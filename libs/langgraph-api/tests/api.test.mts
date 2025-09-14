@@ -31,7 +31,7 @@ interface AgentState {
   sharedStateValue?: string | null;
 }
 
-const IS_MEMORY = true;
+const IS_MEMORY = true
 
 beforeAll(async () => {
   if (process.env.TURBO_HASH) {
@@ -296,7 +296,7 @@ describe("assistants", () => {
 });
 
 describe("threads crud", () => {
-  beforeEach(() => truncate(API_URL, { threads: true }));
+  beforeEach(async () => await truncate(API_URL, { threads: true }));
 
   it("create, read, update, delete thread", async () => {
     const metadata = { name: "test_thread" };
@@ -434,6 +434,8 @@ describe("threads crud", () => {
 });
 
 describe("threads copy", () => {
+  beforeEach(async () => await truncate(API_URL, { threads: true }));
+
   it.concurrent("copy", async () => {
     const assistantId = "agent";
     const thread = await client.threads.create();
@@ -671,11 +673,13 @@ describe("threads copy", () => {
 });
 
 describe("runs", () => {
-  beforeAll(async () => truncate(API_URL, { store: true, threads: true }));
+  beforeAll(async () => await truncate(API_URL, { store: true, threads: true, runs: true }));
 
   it.concurrent("list runs", async () => {
+    // Create resources
     const assistant = await client.assistants.create({ graphId: "agent" });
     const thread = await client.threads.create();
+
     await client.runs.wait(thread.thread_id, assistant.assistant_id, {
       input: { messages: [{ type: "human", content: "foo" }] },
       config: globalConfig,
@@ -1180,7 +1184,7 @@ describe("runs", () => {
 });
 
 describe("shared state", () => {
-  beforeEach(() => truncate(API_URL, { store: true }));
+  beforeEach(async () => await truncate(API_URL, { store: true }));
 
   it("should share state between runs with the same thread ID", async () => {
     const assistant = await client.assistants.create({ graphId: "agent" });
@@ -1304,7 +1308,7 @@ describe("shared state", () => {
 });
 
 describe("StoreClient", () => {
-  beforeEach(async () => truncate(API_URL, { store: true }));
+  beforeEach(async () => await truncate(API_URL, { store: true }));
 
   it("Should be able to use the store client methods", async () => {
     const assistant = await client.assistants.create({ graphId: "agent" });
@@ -2333,8 +2337,6 @@ describe("multitasking", () => {
   it("multitasking enqueue", { timeout: 8_000, retry: 3 }, async () => {
     const assistant = await client.assistants.create({ graphId: "agent" });
     const thread = await client.threads.create();
-
-    // Start first run
     const input1 = {
       messages: [{ role: "human", content: "foo", id: "initial-message-1" }],
       sleep: 2,

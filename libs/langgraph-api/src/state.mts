@@ -33,7 +33,7 @@ export const stateSnapshotToThreadState = (
         task.state != null && isStateSnapshot(task.state)
           ? stateSnapshotToThreadState(task.state)
           : null,
-      result: task.result ?? null,
+      result: (task.result ?? null) as Record<string, unknown> | null,
     })),
     metadata: state.metadata as Record<string, unknown> | undefined,
     created_at: state.createdAt ? new Date(state.createdAt) : null,

@@ -486,6 +486,7 @@ export class PostgresSaver extends BaseCheckpointSaver {
       checkpoint_id,
     } = config.configurable;
 
+
     const nextConfig = {
       configurable: {
         thread_id,
@@ -509,6 +510,7 @@ export class PostgresSaver extends BaseCheckpointSaver {
           serializedBlob
         );
       }
+
       await client.query(this.SQL_STATEMENTS.UPSERT_CHECKPOINTS_SQL, [
         thread_id,
         checkpoint_ns,

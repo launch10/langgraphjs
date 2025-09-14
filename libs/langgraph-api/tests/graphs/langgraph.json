@@ -15,7 +15,5 @@
   "http": {
     "app": "./http.mts:app"
   },
-  "env": {
-    "LANGGRAPH_CONFIG": "{\"agent\": {\"configurable\": {\"model_name\": \"openai\"}}}"
-  }
+  "env": "../../.env"
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { deserialize, serialize } from "../src/storage/persist.mjs";
+import { deserialize, serialize } from "../src/storage/persist/index.mjs";
 import { HumanMessage, AIMessage } from "@langchain/core/messages";
 
 describe("persist", () => {
