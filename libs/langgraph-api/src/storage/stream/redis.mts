@@ -2,6 +2,7 @@ import { Redis } from "ioredis";
 import { storageConfig } from "../config.mjs"
 import { Queue } from "../queue/index.mjs";
 import { logger } from "../../logging.mjs";
+import { streamRedisConnectionManager } from "./redis-connection-manager.mjs";
 import { 
     StreamManagerInterface,
     CancellationAbortController,
@@ -20,8 +21,8 @@ export class RedisStreamManager implements StreamManagerInterface {
     if (!storageConfig.REDIS_URI_CUSTOM) {
         throw new Error("Redis not initialized for StreamManager.");
     }
-    this.redis = new Redis(storageConfig.REDIS_URI_CUSTOM)
-    this.subscriber = new Redis(storageConfig.REDIS_URI_CUSTOM)
+    this.redis = streamRedisConnectionManager.getMainConnection();
+    this.subscriber = streamRedisConnectionManager.getSubscriberConnection();
     this.setupCancellationListener();
   }
 

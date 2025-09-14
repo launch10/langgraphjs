@@ -18,7 +18,7 @@ const _ensureCompleteOptions = (
 };
 
 export const SCHEMA_TABLES = {
-  schema_migrations: "schema_migrations",
+  schema_migrations: "langgraph_schema_migrations",
   assistants: "assistant",
   assistant_versions: "assistant_versions",
   runs: "run",

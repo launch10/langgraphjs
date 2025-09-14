@@ -1,6 +1,7 @@
 import { Redis } from "ioredis";
 import { storageConfig } from "../config.mjs"
 import { serialize, deserialize } from "../persist/memory.mjs"
+import { redisConnectionManager } from "./redis-connection-manager.mjs"
 import { 
     QueueInterface,
     GET_OPTIONS,
@@ -21,7 +22,7 @@ export class RedisQueue implements QueueInterface {
     if (!storageConfig.REDIS_URI_CUSTOM) {
       throw new Error("REDIS_URI_CUSTOM must be set");
     }
-    this.redis = new Redis(storageConfig.REDIS_URI_CUSTOM)
+    this.redis = redisConnectionManager.getConnection();
     this.redisUri = storageConfig.REDIS_URI_CUSTOM;
 
     this.queueId = options.queueId;
@@ -46,10 +47,7 @@ export class RedisQueue implements QueueInterface {
 
   async get(options: GET_OPTIONS): Promise<[id: string, message: Message]> {
     // Create a dedicated client for this single blocking operation
-    const blocker = new Redis(this.redisUri, {
-      // Prevent ioredis from trying to reconnect after we forcefully disconnect it
-      maxRetriesPerRequest: 0,
-    });
+    const blocker = redisConnectionManager.createBlockingConnection(this.redisUri);
 
     const abortHandler = () => {
       // The sole job of the abort handler is to trigger the cancellation

@@ -23,6 +23,8 @@ import { registerHttp } from "./http/custom.mjs";
 import { cors, ensureContentType } from "./http/middleware.mjs";
 import { bindLoopbackFetch } from "./loopback.mjs";
 import { checkLangGraphSemver } from "./semver/index.mjs";
+import { redisConnectionManager } from "./storage/queue/redis-connection-manager.mjs";
+import { streamRedisConnectionManager } from "./storage/stream/redis-connection-manager.mjs";
 
 export const StartServerSchema = z.object({
   port: z.number(),
@@ -86,6 +88,11 @@ export async function startServer(options: z.infer<typeof StartServerSchema>) {
   const cleanup = async () => {
     logger.info(`Flushing to persistent storage, exiting...`);
     await Promise.all(callbacks.map((c) => c.flush()));
+    logger.info(`Disconnecting Redis connections...`);
+    await Promise.all([
+      redisConnectionManager.disconnect(),
+      streamRedisConnectionManager.disconnect()
+    ]);
   };
 
   logger.info(`Registering graphs from ${options.cwd}`);
