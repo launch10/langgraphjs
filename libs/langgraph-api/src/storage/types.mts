@@ -153,7 +153,7 @@ export interface Store {
 }
 
 export interface Message {
-  topic: `run:${string}:stream:${string}`;
+  topic: `run:${string}:stream:${string}` | `run:${string}:control`;
   data: unknown;
 }
 
@@ -490,6 +490,82 @@ export interface RunNotifier {
     signal?: AbortSignal
   ): Promise<string>;
   isConnected(): boolean;
+}
+
+/**
+ * Interface for stream/queue management and run control.
+ *
+ * Implementations can use in-memory queues (single instance) or
+ * distributed backends like Redis (horizontal scaling).
+ */
+export interface StreamManager {
+  /**
+   * Get or create a queue for a run's stream events.
+   */
+  getQueue(
+    runId: string,
+    options: { ifNotFound: "create"; resumable: boolean }
+  ): StreamQueue;
+
+  /**
+   * Get the abort controller for a locked run.
+   */
+  getControl(runId: string): StreamAbortController | undefined;
+
+  /**
+   * Check if a run is currently locked for processing.
+   */
+  isLocked(runId: string): boolean;
+
+  /**
+   * Lock a run for processing, returning an AbortSignal.
+   * For Redis, use lockWithControl() to auto-subscribe to control signals.
+   */
+  lock(runId: string): AbortSignal;
+
+  /**
+   * Unlock a run after processing.
+   * For Redis, use unlockWithControl() to auto-unsubscribe.
+   */
+  unlock(runId: string): void;
+
+  /**
+   * Lock with automatic control signal subscription (Redis only).
+   * Falls back to regular lock() for in-memory implementation.
+   */
+  lockWithControl?(runId: string): Promise<AbortSignal>;
+
+  /**
+   * Unlock with automatic control signal unsubscription (Redis only).
+   * Falls back to regular unlock() for in-memory implementation.
+   */
+  unlockWithControl?(runId: string): Promise<void>;
+
+  /**
+   * Publish a control signal to a run (Redis only).
+   * For in-memory, use getControl().abort() directly.
+   */
+  publishControl?(runId: string, action: "interrupt" | "rollback"): Promise<void>;
+}
+
+/**
+ * Queue for run stream events.
+ */
+export interface StreamQueue {
+  push(item: Message): void | Promise<void>;
+  get(options: {
+    timeout: number;
+    lastEventId?: string;
+    signal?: AbortSignal;
+  }): Promise<[id: string, message: Message]>;
+}
+
+/**
+ * AbortController with typed abort reason.
+ */
+export interface StreamAbortController {
+  readonly signal: AbortSignal;
+  abort(reason: "rollback" | "interrupt"): void;
 }
 
 export interface Ops {

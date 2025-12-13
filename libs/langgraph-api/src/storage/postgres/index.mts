@@ -71,5 +71,10 @@
  */
 
 export { poolManager, type PostgresConfig } from "./pool.mjs";
-export { PostgresOps } from "./ops.mjs";
+export {
+  PostgresOps,
+  createPostgresOps,
+  type PostgresOpsConfig,
+  type CreatePostgresOpsOptions,
+} from "./ops.mjs";
 export { PostgresNotifier } from "./notifier.mjs";

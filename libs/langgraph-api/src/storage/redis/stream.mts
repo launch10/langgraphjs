@@ -1,9 +1,12 @@
 import { createClient, type RedisClientType } from "redis";
+import type {
+  Message,
+  StreamManager,
+  StreamQueue,
+  StreamAbortController,
+} from "../types.mjs";
 
-export interface Message {
-  topic: `run:${string}:stream:${string}` | `run:${string}:control`;
-  data: unknown;
-}
+export type { Message };
 
 class TimeoutError extends Error {
   constructor() {
@@ -19,13 +22,13 @@ class AbortError extends Error {
   }
 }
 
-class CancellationAbortController extends AbortController {
+class CancellationAbortController extends AbortController implements StreamAbortController {
   abort(reason: "rollback" | "interrupt") {
     super.abort(reason);
   }
 }
 
-export class RedisQueue {
+export class RedisQueue implements StreamQueue {
   private readonly streamManager: RedisStreamManager;
   private readonly resumable: boolean;
   private readonly streamKey: string;
@@ -114,7 +117,7 @@ export class RedisQueue {
 
 export type ControlAction = "interrupt" | "rollback";
 
-export class RedisStreamManager {
+export class RedisStreamManager implements StreamManager {
   private readonly url: string;
   private client: RedisClientType | null = null;
   private subscriberClient: RedisClientType | null = null;
@@ -171,7 +174,7 @@ export class RedisStreamManager {
     return this.queues[runId];
   }
 
-  getControl(runId: string): CancellationAbortController | undefined {
+  getControl(runId: string): StreamAbortController | undefined {
     return this.control[runId];
   }
 

@@ -49,7 +49,7 @@ import { getLangGraphCommand, type RunCommand } from "../../command.mjs";
 import { getGraph } from "../../graph/load.mjs";
 import { logger } from "../../logging.mjs";
 import { serializeError } from "../../utils/serde.mjs";
-import { poolManager, type PostgresConfig } from "./pool.mjs";
+import { poolManager, type PostgresConfig as BasePostgresConfig } from "./pool.mjs";
 import { PostgresNotifier } from "./notifier.mjs";
 import type {
   Metadata,
@@ -74,12 +74,40 @@ import type {
   ThreadsStateRepo,
   ThreadSelectField,
   AssistantSelectField,
+  StreamManager,
+  StreamQueue,
+  StreamAbortController,
 } from "../types.mjs";
+
+/**
+ * Extended PostgresConfig with optional stream manager for horizontal scaling.
+ */
+export interface PostgresOpsConfig extends BasePostgresConfig {
+  /**
+   * Optional stream manager for horizontal scaling.
+   * If not provided, uses in-memory stream manager (single instance only).
+   * For horizontal scaling, use RedisStreamManager.
+   *
+   * @example
+   * ```typescript
+   * import { RedisStreamManager } from "@langchain/langgraph-api/storage/redis";
+   *
+   * const redisStream = new RedisStreamManager(process.env.REDIS_URL!);
+   * await redisStream.connect();
+   *
+   * const ops = new PostgresOps({
+   *   uri: process.env.DATABASE_URL!,
+   *   streamManager: redisStream,
+   * });
+   * ```
+   */
+  streamManager?: StreamManager;
+}
 
 class TimeoutError extends Error {}
 class AbortError extends Error {}
 
-class Queue {
+class InMemoryQueue implements StreamQueue {
   private log: Message[] = [];
   private listeners: ((idx: number) => void)[] = [];
   private nextId = 0;
@@ -89,7 +117,7 @@ class Queue {
     this.resumable = options.resumable;
   }
 
-  push(item: Message) {
+  push(item: Message): void {
     this.log.push(item);
     for (const listener of this.listeners) listener(this.nextId);
     this.nextId += 1;
@@ -150,27 +178,27 @@ class Queue {
   }
 }
 
-class CancellationAbortController extends AbortController {
+class CancellationAbortController extends AbortController implements StreamAbortController {
   abort(reason: "rollback" | "interrupt") {
     super.abort(reason);
   }
 }
 
-class StreamManagerImpl {
-  readers: Record<string, Queue> = {};
-  control: Record<string, CancellationAbortController> = {};
+class InMemoryStreamManager implements StreamManager {
+  private readers: Record<string, InMemoryQueue> = {};
+  private control: Record<string, CancellationAbortController> = {};
 
   getQueue(
     runId: string,
     options: { ifNotFound: "create"; resumable: boolean }
-  ): Queue {
+  ): StreamQueue {
     if (this.readers[runId] == null) {
-      this.readers[runId] = new Queue(options);
+      this.readers[runId] = new InMemoryQueue(options);
     }
     return this.readers[runId];
   }
 
-  getControl(runId: string) {
+  getControl(runId: string): StreamAbortController | undefined {
     if (this.control[runId] == null) return undefined;
     return this.control[runId];
   }
@@ -187,12 +215,12 @@ class StreamManagerImpl {
     return this.control[runId].signal;
   }
 
-  unlock(runId: string) {
+  unlock(runId: string): void {
     delete this.control[runId];
   }
 }
 
-const StreamManager = new StreamManagerImpl();
+const defaultStreamManager = new InMemoryStreamManager();
 
 const isObject = (value: unknown): value is Record<string, unknown> => {
   return typeof value === "object" && value !== null;
@@ -244,12 +272,15 @@ const isJsonbContained = (
  * ```
  */
 export class PostgresOps implements Ops {
-  private readonly config: PostgresConfig;
+  private readonly config: PostgresOpsConfig;
   private checkpointerInstance:
     | import("@langchain/langgraph-checkpoint-postgres").PostgresSaver
     | null = null;
   private storeInstance: import("@langchain/langgraph").BaseStore | null = null;
   private notifierInstance: PostgresNotifier | null = null;
+
+  /** Stream manager for run streams and control signals */
+  readonly streamManager: StreamManager;
 
   /** Repository for assistant operations */
   readonly assistants: PostgresAssistants;
@@ -261,16 +292,17 @@ export class PostgresOps implements Ops {
   /**
    * Create a new PostgresOps instance.
    *
-   * @param config - PostgreSQL configuration including URI and optional schema
+   * @param config - PostgreSQL configuration including URI, optional schema, and optional stream manager
    */
-  constructor(config: PostgresConfig) {
+  constructor(config: PostgresOpsConfig) {
     this.config = config;
+    this.streamManager = config.streamManager ?? defaultStreamManager;
     this.assistants = new PostgresAssistants(this);
     this.runs = new PostgresRuns(this);
     this.threads = new PostgresThreads(this);
   }
 
-  getConfig(): PostgresConfig {
+  getConfig(): PostgresOpsConfig {
     return this.config;
   }
 
@@ -1744,10 +1776,12 @@ class PostgresRuns implements RunsRepo {
 
     for (const row of result.rows) {
       const run = this.rowToRun(row);
-      if (StreamManager.isLocked(run.run_id)) continue;
+      if (this.ops.streamManager.isLocked(run.run_id)) continue;
 
       try {
-        const signal = StreamManager.lock(run.run_id);
+        const signal = this.ops.streamManager.lockWithControl
+          ? await this.ops.streamManager.lockWithControl(run.run_id)
+          : this.ops.streamManager.lock(run.run_id);
 
         const currentResult = await pool.query(
           `SELECT status FROM ${schema}.runs WHERE run_id = $1`,
@@ -1793,7 +1827,11 @@ class PostgresRuns implements RunsRepo {
 
         yield { run, attempt, signal };
       } finally {
-        StreamManager.unlock(run.run_id);
+        if (this.ops.streamManager.unlockWithControl) {
+          await this.ops.streamManager.unlockWithControl(run.run_id);
+        } else {
+          this.ops.streamManager.unlock(run.run_id);
+        }
       }
     }
   }
@@ -2231,8 +2269,12 @@ class PostgresRuns implements RunsRepo {
 
       foundRunsCount += 1;
 
-      const control = StreamManager.getControl(runId);
-      control?.abort(options.action ?? "interrupt");
+      const control = this.ops.streamManager.getControl(runId);
+      const cancelAction = options.action ?? "interrupt";
+      if (this.ops.streamManager.publishControl) {
+        await this.ops.streamManager.publishControl(runId, cancelAction);
+      }
+      control?.abort(cancelAction);
 
       if (run.status === "pending") {
         if (control || action !== "rollback") {
@@ -2388,7 +2430,7 @@ class PostgresRunsStream implements RunsStreamRepo {
     auth: AuthContext | undefined
   ): AsyncGenerator<{ id?: string; event: string; data: unknown }> {
     const signal = options?.cancelOnDisconnect;
-    const queue = StreamManager.getQueue(runId, {
+    const queue = this.ops.streamManager.getQueue(runId, {
       ifNotFound: "create",
       resumable: options.lastEventId != null,
     });
@@ -2465,13 +2507,86 @@ class PostgresRunsStream implements RunsStreamRepo {
     data: unknown;
     resumable: boolean;
   }) {
-    const queue = StreamManager.getQueue(payload.runId, {
+    const queue = this.ops.streamManager.getQueue(payload.runId, {
       ifNotFound: "create",
       resumable: payload.resumable,
     });
-    queue.push({
+    await queue.push({
       topic: `run:${payload.runId}:stream:${payload.event}`,
       data: payload.data,
     });
   }
+}
+
+/**
+ * Configuration options for createPostgresOps factory.
+ */
+export interface CreatePostgresOpsOptions {
+  /**
+   * PostgreSQL connection URI.
+   */
+  postgresUri: string;
+
+  /**
+   * Database schema to use.
+   * @default "public"
+   */
+  schema?: string;
+
+  /**
+   * Redis URL for distributed stream management.
+   * If provided, RedisStreamManager will be used for horizontal scaling.
+   * If not provided, uses in-memory stream manager (single instance only).
+   */
+  redisUrl?: string;
+}
+
+/**
+ * Factory function to create a configured PostgresOps instance.
+ *
+ * This handles the common setup pattern including:
+ * - Pool configuration
+ * - Optional Redis stream manager setup
+ * - Table creation
+ *
+ * @example
+ * ```typescript
+ * // Basic usage (in-memory streams, single instance)
+ * const ops = await createPostgresOps({
+ *   postgresUri: process.env.DATABASE_URL!,
+ * });
+ *
+ * // With Redis for horizontal scaling
+ * const ops = await createPostgresOps({
+ *   postgresUri: process.env.DATABASE_URL!,
+ *   redisUrl: process.env.REDIS_URL,
+ * });
+ * ```
+ */
+export async function createPostgresOps(
+  options: CreatePostgresOpsOptions
+): Promise<PostgresOps> {
+  poolManager.configure({ uri: options.postgresUri, schema: options.schema });
+
+  let streamManager: StreamManager | undefined;
+
+  if (options.redisUrl) {
+    const { RedisStreamManager } = await import("../redis/stream.mjs");
+    const redisStream = new RedisStreamManager(options.redisUrl);
+    await redisStream.connect();
+    streamManager = redisStream;
+    logger.info("Using Redis for stream management (horizontal scaling enabled)");
+  } else {
+    logger.info("Using in-memory stream manager (single instance mode)");
+  }
+
+  const ops = new PostgresOps({
+    uri: options.postgresUri,
+    schema: options.schema,
+    streamManager,
+  });
+
+  await ops.setup();
+
+  return ops;
 }
