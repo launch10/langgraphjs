@@ -483,6 +483,15 @@ export interface AssistantsRepo {
   ): Promise<AssistantVersion[]>;
 }
 
+export interface RunNotifier {
+  waitForNotification(
+    channel: string,
+    timeoutMs: number,
+    signal?: AbortSignal
+  ): Promise<string>;
+  isConnected(): boolean;
+}
+
 export interface Ops {
   readonly assistants: AssistantsRepo;
   readonly threads: ThreadsRepo;
@@ -495,4 +504,7 @@ export interface Ops {
     checkpointer?: boolean;
     store?: boolean;
   }): Promise<void>;
+
+  getNotifier?(): Promise<RunNotifier>;
+  getNotificationChannel?(): string;
 }

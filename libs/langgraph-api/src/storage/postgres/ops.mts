@@ -50,6 +50,7 @@ import { getGraph } from "../../graph/load.mjs";
 import { logger } from "../../logging.mjs";
 import { serializeError } from "../../utils/serde.mjs";
 import { poolManager, type PostgresConfig } from "./pool.mjs";
+import { PostgresNotifier } from "./notifier.mjs";
 import type {
   Metadata,
   ThreadStatus,
@@ -248,6 +249,7 @@ export class PostgresOps implements Ops {
     | import("@langchain/langgraph-checkpoint-postgres").PostgresSaver
     | null = null;
   private storeInstance: import("@langchain/langgraph").BaseStore | null = null;
+  private notifierInstance: PostgresNotifier | null = null;
 
   /** Repository for assistant operations */
   readonly assistants: PostgresAssistants;
@@ -274,6 +276,19 @@ export class PostgresOps implements Ops {
 
   async getPool(): Promise<PoolType> {
     return poolManager.getPool();
+  }
+
+  async getNotifier(): Promise<PostgresNotifier> {
+    if (this.notifierInstance == null) {
+      this.notifierInstance = new PostgresNotifier(this.config.uri);
+      await this.notifierInstance.connect();
+    }
+    return this.notifierInstance;
+  }
+
+  getNotificationChannel(): string {
+    const schema = this.config.schema ?? "public";
+    return schema === "public" ? "new_run" : `${schema}_new_run`;
   }
 
   async getCheckpointer(): Promise<
@@ -391,6 +406,37 @@ export class PostgresOps implements Ops {
     } finally {
       client.release();
     }
+
+    await this.setupRunNotificationTrigger();
+  }
+
+  private async setupRunNotificationTrigger(): Promise<void> {
+    const pool = await this.getPool();
+    const schema = this.config.schema ?? "public";
+    const channelName = schema === "public" ? "new_run" : `${schema}_new_run`;
+
+    await pool.query(`
+      CREATE OR REPLACE FUNCTION ${schema}.notify_new_run() 
+      RETURNS trigger AS $$
+      BEGIN
+        IF NEW.status = 'pending' THEN
+          PERFORM pg_notify('${channelName}', NEW.run_id);
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+    `);
+
+    await pool.query(`
+      DROP TRIGGER IF EXISTS run_insert_notify ON ${schema}.runs;
+    `);
+
+    await pool.query(`
+      CREATE TRIGGER run_insert_notify
+        AFTER INSERT ON ${schema}.runs
+        FOR EACH ROW
+        EXECUTE FUNCTION ${schema}.notify_new_run();
+    `);
   }
 
   async truncate(flags: {
@@ -430,6 +476,10 @@ export class PostgresOps implements Ops {
   }
 
   async shutdown(): Promise<void> {
+    if (this.notifierInstance != null) {
+      await this.notifierInstance.close();
+      this.notifierInstance = null;
+    }
     if (this.checkpointerInstance != null) {
       await this.checkpointerInstance.end();
     }

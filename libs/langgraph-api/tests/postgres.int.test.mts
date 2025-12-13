@@ -1,11 +1,4 @@
-import {
-  afterAll,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  it,
-} from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import pg from "pg";
 import { v4 as uuid4 } from "uuid";
 import { PostgresOps, poolManager } from "../src/storage/postgres/index.mjs";
@@ -29,7 +22,9 @@ beforeAll(async () => {
     await pool.query(`CREATE DATABASE ${testDbName}`);
     console.log(`Created test database: ${testDbName}`);
 
-    testDbUrl = `${TEST_POSTGRES_URL.split("/").slice(0, -1).join("/")}/${testDbName}`;
+    testDbUrl = `${TEST_POSTGRES_URL.split("/")
+      .slice(0, -1)
+      .join("/")}/${testDbName}`;
     poolManager.configure({ uri: testDbUrl });
     ops = new PostgresOps({ uri: testDbUrl });
     await ops.setup();
@@ -203,11 +198,7 @@ describe("PostgresOps - Assistants", () => {
     expect(versions[1].version).toBe(2);
     expect(versions[2].version).toBe(1);
 
-    const assistant = await ops.assistants.setLatest(
-      assistantId,
-      1,
-      undefined
-    );
+    const assistant = await ops.assistants.setLatest(assistantId, 1, undefined);
     expect(assistant.version).toBe(1);
   });
 
@@ -285,7 +276,10 @@ describe("PostgresOps - Threads", () => {
       { metadata: { modified: true } },
       undefined
     );
-    expect(patched.metadata).toMatchObject({ name: "test_thread", modified: true });
+    expect(patched.metadata).toMatchObject({
+      name: "test_thread",
+      modified: true,
+    });
 
     const deleted = await ops.threads.delete(threadId, undefined);
     expect(deleted).toContain(threadId);
@@ -377,7 +371,10 @@ describe("PostgresOps - Threads", () => {
     const copied = await ops.threads.copy(threadId, undefined);
 
     expect(copied.thread_id).not.toBe(threadId);
-    expect(copied.metadata).toMatchObject({ original: true, thread_id: copied.thread_id });
+    expect(copied.metadata).toMatchObject({
+      original: true,
+      thread_id: copied.thread_id,
+    });
     expect(copied.status).toBe("idle");
 
     const original = await ops.threads.get(threadId, undefined);
@@ -601,11 +598,7 @@ describe("PostgresOps - Truncate", () => {
       undefined
     );
 
-    await ops.threads.put(
-      threadId,
-      { if_exists: "do_nothing" },
-      undefined
-    );
+    await ops.threads.put(threadId, { if_exists: "do_nothing" }, undefined);
 
     await ops.runs.put(
       runId,
