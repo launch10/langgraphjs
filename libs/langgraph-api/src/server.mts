@@ -72,6 +72,7 @@ export const StartServerSchema = z.object({
         .optional(),
     })
     .optional(),
+  postgresUri: z.string().optional(),
 });
 
 export async function startServer(
@@ -93,31 +94,54 @@ export async function startServer(
   }
 
   logger.info(`Initializing storage...`);
-  let initCalls: Promise<FileSystemPersistence<unknown>>[] = [
-    checkpointer.initialize(options.cwd),
-    graphStore.initialize(options.cwd),
-  ];
+  let initCalls: Promise<FileSystemPersistence<unknown>>[] = [];
+  let postgresOps: import("./storage/postgres/ops.mjs").PostgresOps | null =
+    null;
 
   let ops = storage?.ops;
   if (ops == null) {
-    const opsConn = new FileSystemPersistence<Store>(
-      ".langgraphjs_ops.json",
-      () => ({
-        runs: {},
-        threads: {},
-        assistants: {},
-        assistant_versions: [],
-        retry_counter: {},
-      })
-    );
-    initCalls.push(opsConn.initialize(options.cwd));
-    ops = new FileSystemOps(opsConn);
+    if (options.postgresUri) {
+      logger.info(
+        `Using PostgreSQL storage: ${options.postgresUri.replace(
+          /\/\/[^:]+:[^@]+@/,
+          "//***:***@"
+        )}`
+      );
+      const { PostgresOps, poolManager } = await import(
+        "./storage/postgres/index.mjs"
+      );
+      poolManager.configure({ uri: options.postgresUri });
+      postgresOps = new PostgresOps({ uri: options.postgresUri });
+      await postgresOps.setup();
+      ops = postgresOps;
+    } else {
+      initCalls = [
+        checkpointer.initialize(options.cwd),
+        graphStore.initialize(options.cwd),
+      ];
+      const opsConn = new FileSystemPersistence<Store>(
+        ".langgraphjs_ops.json",
+        () => ({
+          runs: {},
+          threads: {},
+          assistants: {},
+          assistant_versions: [],
+          retry_counter: {},
+        })
+      );
+      initCalls.push(opsConn.initialize(options.cwd));
+      ops = new FileSystemOps(opsConn);
+    }
   }
   const callbacks = await Promise.all(initCalls);
 
   const cleanup = async () => {
     logger.info(`Flushing to persistent storage, exiting...`);
-    await Promise.all(callbacks.map((c) => c.flush()));
+    if (postgresOps != null) {
+      await postgresOps.shutdown();
+    } else {
+      await Promise.all(callbacks.map((c) => c.flush()));
+    }
   };
 
   // Register global logger that can be consumed via SDK

@@ -1680,11 +1680,13 @@ __metadata:
     "@langchain/core": "npm:^1.0.0"
     "@langchain/langgraph": "workspace:*"
     "@langchain/langgraph-checkpoint": "workspace:*"
+    "@langchain/langgraph-checkpoint-postgres": "workspace:*"
     "@langchain/langgraph-sdk": "workspace:*"
     "@langchain/langgraph-ui": "workspace:*"
     "@types/babel__code-frame": "npm:^7.0.6"
     "@types/json-schema": "npm:^7.0.15"
     "@types/node": "npm:^18.15.11"
+    "@types/pg": "npm:^8.11.6"
     "@types/react": "npm:^19.0.8"
     "@types/react-dom": "npm:^19.0.3"
     "@types/semver": "npm:^7.7.0"
@@ -1697,6 +1699,7 @@ __metadata:
     jose: "npm:^6.0.10"
     langsmith: "npm:^0.3.33"
     open: "npm:^10.1.0"
+    pg: "npm:^8.13.0"
     postgres: "npm:^3.4.5"
     prettier: "npm:^2.8.3"
     semver: "npm:^7.7.1"
@@ -1714,9 +1717,15 @@ __metadata:
     "@langchain/core": ^0.3.59 || ^1.0.1
     "@langchain/langgraph": ^0.2.57 || ^0.3.0 || ^0.4.0 || ^1.0.0-alpha || ^1.0.0
     "@langchain/langgraph-checkpoint": ~0.0.16 || ^0.1.0 || ~1.0.0
+    "@langchain/langgraph-checkpoint-postgres": ^0.1.0
+    "@langchain/langgraph-postgres": ^0.0.1
     "@langchain/langgraph-sdk": ~0.0.16 || ^0.1.0 || ^1.0.0
     typescript: ^5.5.4
   peerDependenciesMeta:
+    "@langchain/langgraph-checkpoint-postgres":
+      optional: true
+    "@langchain/langgraph-postgres":
+      optional: true
     "@langchain/langgraph-sdk":
       optional: true
   languageName: unknown
@@ -4396,6 +4405,17 @@ __metadata:
     pg-protocol: "npm:*"
     pg-types: "npm:^4.0.1"
   checksum: 10/65b7d7ca9c90b7cb94aa94ad94bb1883356845e1f64688bc824ecd499da25f63a2400f0a58500554637048a7cc8b91055bbfe14301c082ce9669afd0c18e414c
+  languageName: node
+  linkType: hard
+
+"@types/pg@npm:^8.11.6":
+  version: 8.16.0
+  resolution: "@types/pg@npm:8.16.0"
+  dependencies:
+    "@types/node": "npm:*"
+    pg-protocol: "npm:*"
+    pg-types: "npm:^2.2.0"
+  checksum: 10/c03346fbe87728a237f30a3d0a436b86ede88e1dc471782bf679a4d74d67ee2a96f953e7c04d73841d21b9db43a5bf2ccdf2cd4c75450ea57efd947049809b3a
   languageName: node
   linkType: hard
 
@@ -11428,7 +11448,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"pg-types@npm:^2.1.0":
+"pg-types@npm:^2.1.0, pg-types@npm:^2.2.0":
   version: 2.2.0
   resolution: "pg-types@npm:2.2.0"
   dependencies:
