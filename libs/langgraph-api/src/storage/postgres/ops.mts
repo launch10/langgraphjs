@@ -1305,17 +1305,54 @@ class PostgresThreads implements ThreadsRepo {
       metadata: newMetadata,
     });
 
-    await pool.query(
-      `INSERT INTO ${schema}.threads (thread_id, status, config, metadata, values, interrupts)
-       VALUES ($1, 'idle', $2, $3, $4, $5)`,
-      [
-        newThreadId,
-        JSON.stringify(fromThread.config ?? {}),
-        JSON.stringify(newMetadata),
-        JSON.stringify(fromThread.values ?? null),
-        JSON.stringify(fromThread.interrupts ?? null),
-      ]
-    );
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      await client.query(
+        `INSERT INTO ${schema}.threads (thread_id, status, config, metadata, values, interrupts)
+         VALUES ($1, 'idle', $2, $3, $4, $5)`,
+        [
+          newThreadId,
+          JSON.stringify(fromThread.config ?? {}),
+          JSON.stringify(newMetadata),
+          JSON.stringify(fromThread.values ?? null),
+          JSON.stringify(fromThread.interrupts ?? null),
+        ]
+      );
+
+      await client.query(
+        `INSERT INTO ${schema}.checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, type, checkpoint, metadata)
+         SELECT $1, checkpoint_ns, checkpoint_id, parent_checkpoint_id, type, checkpoint,
+                jsonb_set(metadata, '{thread_id}', to_jsonb($1::text))
+         FROM ${schema}.checkpoints
+         WHERE thread_id = $2`,
+        [newThreadId, thread_id]
+      );
+
+      await client.query(
+        `INSERT INTO ${schema}.checkpoint_blobs (thread_id, checkpoint_ns, channel, version, type, blob)
+         SELECT $1, checkpoint_ns, channel, version, type, blob
+         FROM ${schema}.checkpoint_blobs
+         WHERE thread_id = $2`,
+        [newThreadId, thread_id]
+      );
+
+      await client.query(
+        `INSERT INTO ${schema}.checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, idx, channel, type, blob)
+         SELECT $1, checkpoint_ns, checkpoint_id, task_id, idx, channel, type, blob
+         FROM ${schema}.checkpoint_writes
+         WHERE thread_id = $2`,
+        [newThreadId, thread_id]
+      );
+
+      await client.query("COMMIT");
+    } catch (e) {
+      await client.query("ROLLBACK");
+      throw e;
+    } finally {
+      client.release();
+    }
 
     return this.get(newThreadId, auth);
   }
