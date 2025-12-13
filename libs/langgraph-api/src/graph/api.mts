@@ -4,4 +4,8 @@ export {
   getAssistantId,
   getGraph,
   getGraphKeys,
+  registerFromEnv,
+  GRAPHS,
+  GRAPH_SPEC,
+  GRAPH_SCHEMA,
 } from "./load.mjs";
