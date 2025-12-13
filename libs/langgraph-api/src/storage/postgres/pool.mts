@@ -50,6 +50,37 @@ export interface PostgresConfig {
    * @default "public"
    */
   schema?: string;
+
+  /**
+   * Maximum number of clients in the pool.
+   * @default 20
+   */
+  maxConnections?: number;
+
+  /**
+   * Minimum number of idle clients in the pool.
+   * @default 0
+   */
+  minConnections?: number;
+
+  /**
+   * How long a client can sit idle in the pool before being closed (ms).
+   * @default 10000
+   */
+  idleTimeoutMs?: number;
+
+  /**
+   * How long to wait when acquiring a connection from pool (ms).
+   * @default 30000
+   */
+  connectionTimeoutMs?: number;
+
+  /**
+   * Maximum time a connection can exist before being destroyed (ms).
+   * Helps prevent issues with stale connections. Set to 0 to disable.
+   * @default 0 (disabled)
+   */
+  maxLifetimeMs?: number;
 }
 
 /**
@@ -98,6 +129,13 @@ class PostgresPoolManager {
 
     this.pool = new Pool({
       connectionString: this.config.uri,
+      max: this.config.maxConnections ?? 20,
+      min: this.config.minConnections ?? 0,
+      idleTimeoutMillis: this.config.idleTimeoutMs ?? 10000,
+      connectionTimeoutMillis: this.config.connectionTimeoutMs ?? 30000,
+      maxLifetimeSeconds: this.config.maxLifetimeMs
+        ? Math.floor(this.config.maxLifetimeMs / 1000)
+        : 0,
     });
 
     this.pool.on("error", (err) => {

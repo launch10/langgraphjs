@@ -73,6 +73,7 @@ export const StartServerSchema = z.object({
     })
     .optional(),
   postgresUri: z.string().optional(),
+  redisUrl: z.string().optional(),
 });
 
 export async function startServer(
@@ -107,12 +108,16 @@ export async function startServer(
           "//***:***@"
         )}`
       );
-      const { PostgresOps, poolManager } = await import(
+      if (options.redisUrl) {
+        logger.info(`Using Redis for horizontal scaling`);
+      }
+      const { createPostgresOps } = await import(
         "./storage/postgres/index.mjs"
       );
-      poolManager.configure({ uri: options.postgresUri });
-      postgresOps = new PostgresOps({ uri: options.postgresUri });
-      await postgresOps.setup();
+      postgresOps = await createPostgresOps({
+        postgresUri: options.postgresUri,
+        redisUrl: options.redisUrl,
+      });
       ops = postgresOps;
     } else {
       initCalls = [

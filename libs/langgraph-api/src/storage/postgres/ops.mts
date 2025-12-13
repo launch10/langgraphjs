@@ -440,6 +440,8 @@ export class PostgresOps implements Ops {
     }
 
     await this.setupRunNotificationTrigger();
+
+    await this.getStore();
   }
 
   private async setupRunNotificationTrigger(): Promise<void> {

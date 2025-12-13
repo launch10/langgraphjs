@@ -2,8 +2,9 @@ import { Hono } from "hono";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as url from "node:url";
+import type { StorageEnv } from "../storage/types.mjs";
 
-const api = new Hono();
+const api = new Hono<StorageEnv>();
 
 // Get the version using the same pattern as semver/index.mts
 const packageJsonPath = path.resolve(
@@ -74,5 +75,57 @@ api.get("/info", async (c) => {
 });
 
 api.get("/ok", (c) => c.json({ ok: true }));
+
+api.get("/health/ready", async (c) => {
+  const ops = c.get("LANGGRAPH_OPS");
+  const checks: Record<string, "ok" | "error" | "unavailable"> = {};
+
+  if ("getPool" in ops && typeof ops.getPool === "function") {
+    try {
+      const pool = await (ops as any).getPool();
+      await pool.query("SELECT 1");
+      checks.postgres = "ok";
+    } catch {
+      checks.postgres = "error";
+    }
+  } else {
+    checks.postgres = "unavailable";
+  }
+
+  if (
+    "streamManager" in ops &&
+    ops.streamManager &&
+    typeof (ops.streamManager as any).getClient === "function"
+  ) {
+    try {
+      const client = (ops.streamManager as any).getClient();
+      if (client?.isOpen) {
+        checks.redis = "ok";
+      } else {
+        checks.redis = "error";
+      }
+    } catch {
+      checks.redis = "error";
+    }
+  }
+
+  if ("getCheckpointer" in ops && typeof ops.getCheckpointer === "function") {
+    try {
+      await (ops as any).getCheckpointer();
+      checks.checkpointer = "ok";
+    } catch {
+      checks.checkpointer = "error";
+    }
+  }
+
+  const healthy = Object.entries(checks)
+    .filter(([, status]) => status !== "unavailable")
+    .every(([, status]) => status === "ok");
+
+  return c.json(
+    { status: healthy ? "ready" : "unhealthy", checks },
+    healthy ? 200 : 503
+  );
+});
 
 export default api;
