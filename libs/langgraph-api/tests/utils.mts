@@ -37,7 +37,7 @@ export async function truncate(
           threads: true,
           assistants: true,
           store: true,
-          checkpoint: true,
+          checkpointer: true,
         }
       : options === "full"
         ? {
@@ -45,7 +45,7 @@ export async function truncate(
             threads: true,
             assistants: true,
             store: true,
-            checkpoint: true,
+            checkpointer: true,
             full: true,
           }
         : options;

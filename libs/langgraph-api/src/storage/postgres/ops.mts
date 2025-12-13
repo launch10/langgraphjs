@@ -507,7 +507,7 @@ export class PostgresOps implements Ops {
         await pool.query(`DELETE FROM ${schema}.assistants`);
       } else {
         await pool.query(
-          `DELETE FROM ${schema}.assistants WHERE NOT (metadata->>'created_by' = 'system')`
+          `DELETE FROM ${schema}.assistants WHERE metadata->>'created_by' IS DISTINCT FROM 'system'`
         );
       }
       await pool.query(`DELETE FROM ${schema}.assistant_versions`);
