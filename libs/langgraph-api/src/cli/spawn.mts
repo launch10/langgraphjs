@@ -6,6 +6,7 @@ export async function spawnServer(
     host: string;
     port: string;
     nJobsPerWorker: string;
+    postgresUri?: string;
   },
   context: {
     config: {
@@ -42,6 +43,13 @@ export async function spawnServer(
   const localUrl = `http://${args.host}:${args.port}`;
   const studioUrl = `${context.hostUrl}/studio?baseUrl=${localUrl}`;
 
+  const storageInfo = args.postgresUri
+    ? `PostgreSQL (${args.postgresUri.replace(
+        /\/\/[^:]+:[^@]+@/,
+        "//***:***@"
+      )})`
+    : "In-memory (file system)";
+
   console.log(`
           Welcome to
 
@@ -51,8 +59,13 @@ export async function spawnServer(
 
 - 🚀 API: \x1b[36m${localUrl}\x1b[0m
 - 🎨 Studio UI: \x1b[36m${studioUrl}\x1b[0m
+- 💾 Storage: ${storageInfo}
 
-This in-memory server is designed for development and testing.
+${
+  args.postgresUri
+    ? "Using PostgreSQL for persistent storage."
+    : "This in-memory server is designed for development and testing."
+}
 For production use, please use LangSmith Deployment.
 
 `);
@@ -79,6 +92,7 @@ For production use, please use LangSmith Deployment.
         ui_config: context.config.ui_config,
         cwd: options.projectCwd,
         http: context.config.http,
+        postgresUri: args.postgresUri,
       }),
     ],
     {
