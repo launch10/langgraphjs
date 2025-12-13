@@ -323,40 +323,52 @@ export class PostgresOps implements Ops {
     return schema === "public" ? "new_run" : `${schema}_new_run`;
   }
 
+  private checkpointerPromise: Promise<
+    import("@langchain/langgraph-checkpoint-postgres").PostgresSaver
+  > | null = null;
+
   async getCheckpointer(): Promise<
     import("@langchain/langgraph-checkpoint-postgres").PostgresSaver
   > {
-    if (this.checkpointerInstance == null) {
-      const { PostgresSaver } = await import(
-        "@langchain/langgraph-checkpoint-postgres"
-      );
-      this.checkpointerInstance = PostgresSaver.fromConnString(
-        this.config.uri,
-        {
-          schema: this.config.schema ?? "public",
+    if (this.checkpointerPromise == null) {
+      this.checkpointerPromise = (async () => {
+        if (this.checkpointerInstance == null) {
+          const { PostgresSaver } = await import(
+            "@langchain/langgraph-checkpoint-postgres"
+          );
+          this.checkpointerInstance = PostgresSaver.fromConnString(
+            this.config.uri,
+            {
+              schema: this.config.schema ?? "public",
+            }
+          );
+          await this.checkpointerInstance.setup();
         }
-      );
-      await this.checkpointerInstance.setup();
+        return this.checkpointerInstance;
+      })();
     }
-    return this.checkpointerInstance;
+    return this.checkpointerPromise;
   }
 
-  async getStore(): Promise<
-    import("@langchain/langgraph").BaseStore | undefined
-  > {
-    if (this.storeInstance == null) {
-      try {
-        // @ts-expect-error - PostgresStore may not be installed
-        const { PostgresStore } = await import("@langchain/langgraph-postgres");
-        const pool = await this.getPool();
-        this.storeInstance = new PostgresStore({ pool });
-        await (this.storeInstance as any).setup?.();
-      } catch {
-        logger.warn("PostgresStore not available, store operations disabled");
-        return undefined;
-      }
+  private storePromise: Promise<
+    import("@langchain/langgraph").BaseStore
+  > | null = null;
+
+  async getStore(): Promise<import("@langchain/langgraph").BaseStore> {
+    if (this.storePromise == null) {
+      this.storePromise = (async () => {
+        if (this.storeInstance == null) {
+          const { PostgresStore } = await import("@langchain/langgraph-checkpoint-postgres/store");
+          const store = PostgresStore.fromConnString(this.config.uri, {
+            schema: this.config.schema ?? "public",
+          });
+          await store.setup();
+          this.storeInstance = store;
+        }
+        return this.storeInstance;
+      })();
     }
-    return this.storeInstance ?? undefined;
+    return this.storePromise;
   }
 
   async setup(): Promise<void> {
@@ -479,6 +491,7 @@ export class PostgresOps implements Ops {
     assistants?: boolean;
     checkpointer?: boolean;
     store?: boolean;
+    full?: boolean;
   }): Promise<void> {
     const pool = await this.getPool();
     const schema = this.config.schema ?? "public";
@@ -490,9 +503,13 @@ export class PostgresOps implements Ops {
       await pool.query(`DELETE FROM ${schema}.threads`);
     }
     if (flags.assistants) {
-      await pool.query(
-        `DELETE FROM ${schema}.assistants WHERE NOT (metadata->>'created_by' = 'system')`
-      );
+      if (flags.full) {
+        await pool.query(`DELETE FROM ${schema}.assistants`);
+      } else {
+        await pool.query(
+          `DELETE FROM ${schema}.assistants WHERE NOT (metadata->>'created_by' = 'system')`
+        );
+      }
       await pool.query(`DELETE FROM ${schema}.assistant_versions`);
     }
     if (flags.checkpointer) {

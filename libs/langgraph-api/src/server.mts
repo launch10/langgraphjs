@@ -2,7 +2,7 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { contextStorage } from "hono/context-storage";
 
-import { registerFromEnv } from "./graph/load.mjs";
+import { registerFromEnv, setDefaults } from "./graph/load.mjs";
 
 import runs from "./api/runs.mjs";
 import threads from "./api/threads.mjs";
@@ -119,6 +119,16 @@ export async function startServer(
         redisUrl: options.redisUrl,
       });
       ops = postgresOps;
+
+      // Set postgres checkpointer and store as the defaults for all graphs
+      // Both are required for postgres mode - getStore() throws if PostgresStore not installed
+      const postgresCheckpointer = await postgresOps.getCheckpointer();
+      const postgresStore = await postgresOps.getStore();
+      setDefaults({
+        checkpointer: postgresCheckpointer,
+        store: postgresStore,
+      });
+      logger.info("Postgres checkpointer and store initialized as defaults");
     } else {
       initCalls = [
         checkpointer.initialize(options.cwd),
@@ -204,13 +214,14 @@ export async function startServer(
         assistants: z.boolean().optional(),
         checkpointer: z.boolean().optional(),
         store: z.boolean().optional(),
+        full: z.boolean().optional(),
       })
     ),
-    (c) => {
-      const { runs, threads, assistants, checkpointer, store } =
+    async (c) => {
+      const { runs, threads, assistants, checkpointer, store, full } =
         c.req.valid("json");
 
-      ops.truncate({ runs, threads, assistants, checkpointer, store });
+      await ops.truncate({ runs, threads, assistants, checkpointer, store, full });
       return c.json({ ok: true });
     }
   );

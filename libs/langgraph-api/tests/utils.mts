@@ -25,8 +25,10 @@ export async function truncate(
         assistants?: boolean;
         store?: boolean;
         checkpoint?: boolean;
+        full?: boolean;
       }
     | "all"
+    | "full"
 ) {
   const flags =
     options === "all"
@@ -37,7 +39,16 @@ export async function truncate(
           store: true,
           checkpoint: true,
         }
-      : options;
+      : options === "full"
+        ? {
+            runs: true,
+            threads: true,
+            assistants: true,
+            store: true,
+            checkpoint: true,
+            full: true,
+          }
+        : options;
 
   await fetch(`${apiUrl}/internal/truncate`, {
     method: "POST",

@@ -1,8 +1,6 @@
 import { BaseMessageChunk, isBaseMessage } from "@langchain/core/messages";
 import { LangChainTracer } from "@langchain/core/tracers/tracer_langchain";
 import type {
-  BaseCheckpointSaver,
-  LangGraphRunnableConfig,
   CheckpointMetadata,
   Interrupt,
   StateSnapshot,
@@ -10,6 +8,7 @@ import type {
 import type { Pregel } from "@langchain/langgraph/pregel";
 import { Client as LangSmithClient, getDefaultProjectName } from "langsmith";
 import { getLangGraphCommand } from "./command.mjs";
+import { getGraph } from "./graph/load.mjs";
 import { checkLangGraphSemver } from "./semver/index.mjs";
 import type { Checkpoint, Run, RunnableConfig } from "./storage/types.mjs";
 import {
@@ -146,11 +145,6 @@ export async function* streamState(
   run: Run,
   options: {
     attempt: number;
-    getGraph: (
-      graphId: string,
-      config: LangGraphRunnableConfig | undefined,
-      options?: { checkpointer?: BaseCheckpointSaver | null }
-    ) => Promise<Pregel<any, any, any, any, any>>;
     onCheckpoint?: (checkpoint: StreamCheckpoint) => void;
     onTaskResult?: (taskResult: StreamTaskResult) => void;
     signal?: AbortSignal;
@@ -163,9 +157,11 @@ export async function* streamState(
     throw new Error("Invalid or missing graph_id");
   }
 
-  const graph = await options.getGraph(graphId, kwargs.config, {
-    checkpointer: kwargs.temporary ? null : undefined,
-  });
+  const graph = await getGraph(
+    graphId,
+    kwargs.config,
+    kwargs.temporary ? { checkpointer: null } : undefined
+  );
 
   const userStreamMode = kwargs.stream_mode ?? [];
 
@@ -197,6 +193,7 @@ export async function* streamState(
 
   const metadata = {
     ...kwargs.config?.metadata,
+    ...run.metadata,
     run_attempt: options.attempt,
     langgraph_version: LANGGRAPH_VERSION?.version ?? "0.0.0",
     langgraph_plan: "developer",
@@ -230,8 +227,11 @@ export async function* streamState(
       interruptBefore: kwargs.interrupt_before,
 
       tags: kwargs.config?.tags,
-      context: kwargs.context,
-      configurable: kwargs.config?.configurable,
+      context: kwargs.context as Record<string, unknown> | undefined,
+      configurable: {
+        ...kwargs.config?.configurable,
+        run_id: run.run_id,
+      },
       recursionLimit: kwargs.config?.recursion_limit,
       subgraphs: kwargs.subgraphs,
       metadata,

@@ -329,7 +329,7 @@ export class PostgresSaver extends BaseCheckpointSaver {
 
     // construct predicate for metadata filter
     if (filter && Object.keys(filter).length > 0) {
-      wheres.push(`metadata @> $${paramValues.length + 1}`);
+      wheres.push(`metadata @> $${paramValues.length + 1}::jsonb`);
       paramValues.push(JSON.stringify(filter));
     }
 
@@ -564,7 +564,24 @@ export class PostgresSaver extends BaseCheckpointSaver {
       thread_id,
       checkpoint_ns = "",
       checkpoint_id,
+      run_id,
     } = config.configurable;
+
+    const EXCLUDED_KEYS = [
+      "checkpoint_ns",
+      "checkpoint_id",
+      "run_id",
+      "thread_id",
+    ];
+    const mergedMetadata = {
+      ...Object.fromEntries(
+        Object.entries(config.configurable ?? {}).filter(
+          ([key]) => !key.startsWith("__") && !EXCLUDED_KEYS.includes(key)
+        )
+      ),
+      ...config.metadata,
+      ...metadata,
+    };
 
     const nextConfig = {
       configurable: {
@@ -595,7 +612,8 @@ export class PostgresSaver extends BaseCheckpointSaver {
         checkpoint.id,
         checkpoint_id,
         serializedCheckpoint,
-        await this._dumpMetadata(metadata),
+        await this._dumpMetadata(mergedMetadata),
+        run_id ?? null,
       ]);
       await client.query("COMMIT");
     } catch (e) {

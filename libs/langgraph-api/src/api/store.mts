@@ -3,10 +3,19 @@ import { zValidator } from "@hono/zod-validator";
 import * as schemas from "../schemas.mjs";
 import { HTTPException } from "hono/http-exception";
 import { store as storageStore } from "../storage/store.mjs";
-import type { Item } from "@langchain/langgraph";
+import type { Item, BaseStore } from "@langchain/langgraph";
 import { handleAuthEvent } from "../auth/index.mjs";
+import type { StorageEnv } from "../storage/types.mjs";
 
-const api = new Hono();
+const api = new Hono<StorageEnv>();
+
+const getStore = async (c: { var: { LANGGRAPH_OPS: StorageEnv["Variables"]["LANGGRAPH_OPS"] } }): Promise<BaseStore> => {
+  const ops = c.var.LANGGRAPH_OPS;
+  if (ops.getStore) {
+    return ops.getStore();
+  }
+  return storageStore;
+};
 
 const validateNamespace = (namespace: string[]) => {
   if (!namespace || namespace.length === 0) {
@@ -54,8 +63,9 @@ api.post(
       offset: payload.offset,
     });
 
+    const store = await getStore(c);
     return c.json({
-      namespaces: await storageStore.listNamespaces({
+      namespaces: await store.listNamespaces({
         limit: payload.limit ?? 100,
         offset: payload.offset ?? 0,
         prefix: payload.prefix,
@@ -82,7 +92,8 @@ api.post(
       query: payload.query,
     });
 
-    const items = await storageStore.search(payload.namespace_prefix, {
+    const store = await getStore(c);
+    const items = await store.search(payload.namespace_prefix, {
       filter: payload.filter,
       limit: payload.limit ?? 10,
       offset: payload.offset ?? 0,
@@ -103,7 +114,8 @@ api.put("/store/items", zValidator("json", schemas.StorePutItem), async (c) => {
     key: payload.key,
     value: payload.value,
   });
-  await storageStore.put(payload.namespace, payload.key, payload.value);
+  const store = await getStore(c);
+  await store.put(payload.namespace, payload.key, payload.value);
   return c.body(null, 204);
 });
 
@@ -119,7 +131,8 @@ api.delete(
       namespace: payload.namespace,
       key: payload.key,
     });
-    await storageStore.delete(payload.namespace ?? [], payload.key);
+    const store = await getStore(c);
+    await store.delete(payload.namespace ?? [], payload.key);
     return c.body(null, 204);
   }
 );
@@ -138,7 +151,8 @@ api.get(
 
     const key = payload.key;
     const namespace = payload.namespace;
-    return c.json(mapItemsToApi(await storageStore.get(namespace, key)));
+    const store = await getStore(c);
+    return c.json(mapItemsToApi(await store.get(namespace, key)));
   }
 );
 

@@ -2,6 +2,8 @@ import type {
   LangGraphRunnableConfig,
   CheckpointMetadata as LangGraphCheckpointMetadata,
   StateSnapshot as LangGraphStateSnapshot,
+  BaseCheckpointSaver,
+  BaseStore,
 } from "@langchain/langgraph";
 import type { RunCommand } from "../command.mjs";
 import type { AuthContext } from "../auth/index.mjs";
@@ -579,8 +581,11 @@ export interface Ops {
     assistants?: boolean;
     checkpointer?: boolean;
     store?: boolean;
+    full?: boolean;
   }): Promise<void>;
 
+  getCheckpointer?(): Promise<BaseCheckpointSaver>;
+  getStore?(): Promise<BaseStore>;
   getNotifier?(): Promise<RunNotifier>;
   getNotificationChannel?(): string;
 }

@@ -7,7 +7,6 @@ import {
 import { logError, logger } from "./logging.mjs";
 import { serializeError } from "./utils/serde.mjs";
 import { callWebhook } from "./webhook.mjs";
-import { getGraph } from "./graph/load.mjs";
 
 const MAX_RETRY_ATTEMPTS = 3;
 const NOTIFICATION_TIMEOUT_MS = 5000;
@@ -32,6 +31,9 @@ export const queue = async (ops: Ops) => {
       });
     }
   }
+
+  // Defaults are set globally by server.mts via setDefaults()
+  // The getGraph function will use those defaults unless explicitly overridden
 
   while (true) {
     let processedAny = false;
@@ -106,7 +108,6 @@ const worker = async (
 
     try {
       const stream = streamState(run, {
-        getGraph,
         attempt,
         signal,
         ...(!temporary ? { onCheckpoint, onTaskResult } : undefined),
@@ -141,20 +142,42 @@ const worker = async (
     endedAt = new Date();
     if (error instanceof Error) exception = error;
 
-    logError(error, {
-      prefix: "Background run failed",
-      context: {
+    const isAbort =
+      signal.aborted ||
+      (error instanceof Error && error.name === "AbortError");
+    const abortReason = signal.reason as string | undefined;
+
+    if (isAbort && abortReason === "interrupt") {
+      logger.info("Background run interrupted", {
         run_id: run.run_id,
         run_attempt: attempt,
-        run_created_at: run.created_at,
-        run_started_at: startedAt,
-        run_ended_at: endedAt,
-        run_exec_ms: endedAt.valueOf() - startedAt.valueOf(),
-      },
-    });
+        reason: abortReason,
+      });
+      status = "interrupted";
+      await ops.runs.setStatus(run.run_id, "interrupted");
+    } else if (isAbort && abortReason === "rollback") {
+      logger.info("Background run rolled back (deleting)", {
+        run_id: run.run_id,
+        run_attempt: attempt,
+      });
+      status = "error";
+      await ops.runs.delete(run.run_id, run.thread_id, undefined);
+    } else {
+      logError(error, {
+        prefix: "Background run failed",
+        context: {
+          run_id: run.run_id,
+          run_attempt: attempt,
+          run_created_at: run.created_at,
+          run_started_at: startedAt,
+          run_ended_at: endedAt,
+          run_exec_ms: endedAt.valueOf() - startedAt.valueOf(),
+        },
+      });
 
-    status = "error";
-    await ops.runs.setStatus(run.run_id, "error");
+      status = "error";
+      await ops.runs.setStatus(run.run_id, "error");
+    }
   } finally {
     if (temporary) {
       await ops.threads.delete(run.thread_id, undefined);

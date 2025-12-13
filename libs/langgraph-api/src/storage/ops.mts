@@ -53,18 +53,23 @@ export class FileSystemOps implements Ops {
     assistants?: boolean;
     checkpointer?: boolean;
     store?: boolean;
+    full?: boolean;
   }): Promise<void> {
     return this.conn.with((STORE) => {
       if (flags.runs) STORE.runs = {};
       if (flags.threads) STORE.threads = {};
       if (flags.assistants) {
-        STORE.assistants = Object.fromEntries(
-          Object.entries(STORE.assistants).filter(
-            ([key, assistant]) =>
-              assistant.metadata?.created_by === "system" &&
-              uuid5(assistant.graph_id, NAMESPACE_GRAPH) === key
-          )
-        );
+        if (flags.full) {
+          STORE.assistants = {};
+        } else {
+          STORE.assistants = Object.fromEntries(
+            Object.entries(STORE.assistants).filter(
+              ([key, assistant]) =>
+                assistant.metadata?.created_by === "system" &&
+                uuid5(assistant.graph_id, NAMESPACE_GRAPH) === key
+            )
+          );
+        }
       }
 
       if (flags.checkpointer) checkpointer.clear();
