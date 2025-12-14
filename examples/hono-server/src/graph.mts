@@ -105,17 +105,17 @@ const model = new ChatAnthropic({
   temperature: 0.7,
 }).withConfig({ tags: ["notify"] });
 
-const innerAgent = createReactAgent({
-  llm: model,
-  tools: [adsFaqTool],
-  prompt: SYSTEM_PROMPT,
-});
-
 async function adsAgentNode(
   state: AdsState,
-  _config: LangGraphRunnableConfig
+  config: LangGraphRunnableConfig
 ): Promise<Partial<AdsState>> {
-  const result = await innerAgent.invoke({ messages: state.messages }, _config);
+  const agent = createReactAgent({
+    llm: model,
+    tools: [adsFaqTool],
+    prompt: SYSTEM_PROMPT,
+  });
+
+  const result = await agent.invoke({ messages: state.messages }, config);
 
   const lastMessage = getLastAIMessage(result.messages);
   if (!lastMessage) {
