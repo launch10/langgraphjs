@@ -11,15 +11,32 @@ export interface ReconstructionOptions<TSchema = unknown> {
   validateSchema?: (data: unknown) => data is TSchema;
 }
 
+export interface ContentBlock {
+  type: string;
+  text?: string;
+  id?: string;
+  index?: number;
+}
+
 export interface Message {
   id?: string;
   type: "human" | "ai" | "system" | "tool";
-  content: string;
+  content: string | ContentBlock[];
   response_metadata?: {
     parsed_blocks?: ParsedBlock[];
     [key: string]: unknown;
   };
   additional_kwargs?: Record<string, unknown>;
+}
+
+function getContentAsString(content: string | ContentBlock[]): string {
+  if (typeof content === "string") {
+    return content;
+  }
+  return content
+    .filter((block) => block.type === "text" && block.text)
+    .map((block) => block.text)
+    .join("");
 }
 
 export function reconstructMessagesWithBlocks<TSchema = unknown>(
@@ -32,16 +49,18 @@ export function reconstructMessagesWithBlocks<TSchema = unknown>(
       const role = message.type === "human" ? "user" : "assistant";
       const id = message.id ?? crypto.randomUUID();
 
+      const contentString = getContentAsString(message.content);
+
       if (role === "user") {
-        return createUserMessage<TSchema>(id, message.content);
+        return createUserMessage<TSchema>(id, contentString);
       }
 
       const parsedBlocks = extractParsedBlocks(message);
-      if (parsedBlocks) {
+      if (parsedBlocks && parsedBlocks.length > 0) {
         return createFromParsedBlocks<TSchema>(id, parsedBlocks, options);
       }
 
-      return reconstructFromContent<TSchema>(message.content, id);
+      return reconstructFromContent<TSchema>(contentString, id);
     });
 }
 
