@@ -187,6 +187,18 @@
         "default": "./dist/graph/zod/schema.cjs"
       }
     },
+    "./streaming": {
+      "input": "./src/streaming/index.ts",
+      "typedoc": "./src/streaming/index.ts",
+      "import": {
+        "types": "./dist/streaming/index.d.ts",
+        "default": "./dist/streaming/index.js"
+      },
+      "require": {
+        "types": "./dist/streaming/index.d.cts",
+        "default": "./dist/streaming/index.cjs"
+      }
+    },
     "./package.json": "./package.json"
   },
   "files": [
