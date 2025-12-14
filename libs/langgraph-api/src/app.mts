@@ -13,7 +13,7 @@ import { bindLoopbackFetch } from "./loopback.mjs";
 import { requestLogger } from "./logging.mjs";
 import { queue } from "./queue.mjs";
 import { registerFromEnv, setDefaults, GRAPHS } from "./graph/load.mjs";
-import type { CompiledGraph } from "@langchain/langgraph";
+import type { CompiledGraph, Graph } from "@langchain/langgraph";
 
 export interface CorsConfig {
   allow_origins?: string[];
@@ -45,7 +45,9 @@ export interface LangGraphApi {
   cleanup: () => Promise<void>;
   registerGraph: (
     graphId: string,
-    graph: CompiledGraph<string, Record<string, unknown>>
+    graph:
+      | CompiledGraph<string, Record<string, unknown>>
+      | Graph<string, Record<string, unknown>>
   ) => Promise<void>;
   registerGraphsFromFiles: (
     graphs: Record<string, string>,
@@ -114,11 +116,20 @@ export async function createLangGraphApi(
 
   const registerGraph = async (
     graphId: string,
-    graph: CompiledGraph<string, Record<string, unknown>>
+    graph:
+      | CompiledGraph<string, Record<string, unknown>>
+      | Graph<string, Record<string, unknown>>
   ) => {
     const { v5: uuidv5 } = await import("uuid");
 
-    GRAPHS[graphId] = graph;
+    const isUncompiledGraph = (
+      g: CompiledGraph<string> | Graph<string>
+    ): g is Graph<string> => {
+      return "compile" in g && typeof g.compile === "function";
+    };
+
+    const compiledGraph = isUncompiledGraph(graph) ? graph.compile() : graph;
+    GRAPHS[graphId] = compiledGraph;
 
     await ops.assistants.put(
       uuidv5(graphId, NAMESPACE_GRAPH),
