@@ -11,16 +11,7 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
-    "isolatedModules": true,
-    "baseUrl": ".",
-    "paths": {
-      "@langchain/langgraph-sdk": ["../../libs/sdk/src/index.ts"],
-      "@langchain/langgraph-sdk/*": ["../../libs/sdk/src/*.ts"],
-      "@langchain/langgraph-api": ["../../libs/langgraph-api/src/cli/spawn.mts"],
-      "@langchain/langgraph-api/*": ["../../libs/langgraph-api/src/*.mts"],
-      "@langchain/langgraph": ["../../libs/langgraph/src/index.ts"],
-      "@langchain/langgraph/*": ["../../libs/langgraph/src/*.ts"]
-    }
+    "isolatedModules": true
   },
   "include": ["src"],
   "ts-node": {

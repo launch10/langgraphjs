@@ -399,6 +399,9 @@ export class SharedChatRegistry<TState extends Record<string, unknown>> {
     this.preStreamState = { ...state };
     this.notifyMessageSubscribers();
     this.notifyStateSubscribers();
+    for (const key of Object.keys(state)) {
+      this.notifyStateKeySubscribers(key);
+    }
   }
 
   setState(partial: Partial<TState>): void {

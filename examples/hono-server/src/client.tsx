@@ -5,7 +5,6 @@ import {
   MergeStrategies,
   type MessageWithBlocks,
   type MessageBlock,
-  type UseStreamUIOptions,
   type UISnapshot,
 } from "@langchain/langgraph-sdk/react";
 
@@ -36,23 +35,15 @@ function getThreadIdFromUrl(): string | undefined {
   return id || undefined;
 }
 
-const initialThreadIdRef = { current: undefined as string | undefined };
-function getInitialThreadId(): string | undefined {
-  if (initialThreadIdRef.current === undefined) {
-    initialThreadIdRef.current = getThreadIdFromUrl();
-  }
-  return initialThreadIdRef.current;
-}
-
 function handleThreadIdChange(threadId: string): void {
   window.history.pushState({}, "", `/${threadId}`);
 }
 
-function getAdsOptions(): UseStreamUIOptions<AdsState> {
+function getAdsOptions() {
   return {
     apiUrl: "http://localhost:8080/api",
     assistantId: "ads",
-    threadId: getInitialThreadId(),
+    getInitialThreadId: getThreadIdFromUrl,
     onThreadId: handleThreadIdChange,
     fetchStateHistory: true,
     merge: {
@@ -74,11 +65,11 @@ function useAdsChat<TSelected = AdsSnapshot>(
 }
 
 function useAdsChatHeadlines() {
-  return useAdsChat((s) => s.state.headlines as Headline[] | undefined);
+  return useAdsChat((s) => s.state.headlines as Headline[]);
 }
 
 function useAdsChatDescriptions() {
-  return useAdsChat((s) => s.state.descriptions as Description[] | undefined);
+  return useAdsChat((s) => s.state.descriptions as Description[]);
 }
 
 function useAdsChatMessages() {
@@ -106,11 +97,12 @@ function useAdsChatStatus() {
 }
 
 function HeadlinesPanel() {
-  const headlines = useAdsChatHeadlines() ?? [];
+  const headlines = useAdsChatHeadlines();
   const isLoading = useAdsChatIsLoading();
   const { setState } = useAdsChatActions();
 
-  const visibleHeadlines = headlines.filter((h) => !h.rejected);
+  console.log(headlines)
+  const visibleHeadlines = headlines ? headlines.filter((h) => !h.rejected) : [];
 
   const handleToggleLock = useCallback((id: string) => {
     const updated = headlines.map((h) =>

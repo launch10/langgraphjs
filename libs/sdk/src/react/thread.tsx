@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 
 export const useControllableThreadId = (options?: {
   threadId?: string | null;
@@ -13,6 +13,12 @@ export const useControllableThreadId = (options?: {
   const onThreadIdRef = useRef(options?.onThreadId);
   onThreadIdRef.current = options?.onThreadId;
 
+  useEffect(() => {
+    if (options && "threadId" in options) {
+      _setLocalThreadId(options.threadId ?? null);
+    }
+  }, [options?.threadId]);
+
   const setThreadId = useCallback((threadId: string) => {
     _setLocalThreadId(threadId);
     onThreadIdRef.current?.(threadId);
@@ -22,5 +28,5 @@ export const useControllableThreadId = (options?: {
     return [localThreadId, setThreadId];
   }
 
-  return [options.threadId ?? null, setThreadId];
+  return [localThreadId, setThreadId];
 };

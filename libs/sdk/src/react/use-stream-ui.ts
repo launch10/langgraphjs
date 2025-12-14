@@ -45,6 +45,7 @@ export interface UseStreamUIOptions<
   defaultHeaders?: ClientConfig["defaultHeaders"];
   messagesKey?: string;
   threadId?: string | null;
+  getInitialThreadId?: () => string | undefined;
   onThreadId?: (threadId: string) => void;
   initialValues?: TState | null;
   fetchStateHistory?: boolean | { limit: number };
@@ -231,13 +232,18 @@ export function useStreamUI<
     ]
   );
 
-  const [threadId, onThreadIdChange] = useControllableThreadId(options);
-
-  const initialThreadIdRef = useRef<string | undefined>(undefined);
-  if (initialThreadIdRef.current === undefined) {
-    initialThreadIdRef.current = threadId ?? undefined;
+  const getInitialThreadIdRef = useRef(options.getInitialThreadId);
+  const resolvedInitialThreadIdRef = useRef<string | null | undefined>(undefined);
+  if (resolvedInitialThreadIdRef.current === undefined) {
+    resolvedInitialThreadIdRef.current = getInitialThreadIdRef.current?.() ?? options.threadId ?? null;
   }
-  const initialThreadId = initialThreadIdRef.current;
+
+  const [threadId, onThreadIdChange] = useControllableThreadId({
+    ...options,
+    threadId: resolvedInitialThreadIdRef.current,
+  });
+
+  const initialThreadId = resolvedInitialThreadIdRef.current ?? undefined;
 
   const registryKeyRef = useRef<string | null>(null);
   const registryRef = useRef<SharedChatRegistry<TState> | null>(null);
