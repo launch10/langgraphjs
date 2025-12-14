@@ -22,6 +22,10 @@ import type {
   MergeReducers,
 } from "../ui/streaming/types.js";
 import { isUIEvent } from "../ui/streaming/types.js";
+import {
+  reconstructMessagesWithBlocks,
+  type Message as HistoryMessage,
+} from "../ui/streaming/history.js";
 import type { Message } from "../types.messages.js";
 import type { ThreadState, Interrupt, Checkpoint, Metadata, Config } from "../schema.js";
 import type { StreamMode } from "../types.stream.js";
@@ -110,11 +114,13 @@ export interface UISnapshot<
   ) => Promise<void>;
   stop: () => Promise<void>;
   setBranch: (branch: string) => void;
+  setState: (partial: Partial<TState>) => void;
   getSubgraphState: (
     namespace: string[]
   ) => Partial<Record<string, unknown>> | undefined;
   client: Client;
   assistantId: string;
+  threadId: string | null;
 }
 
 export interface UseStreamUIResult<
@@ -139,9 +145,11 @@ export interface UseStreamUIResult<
   ) => Promise<void>;
   stop: () => Promise<void>;
   setBranch: (branch: string) => void;
+  setState: (partial: Partial<TState>) => void;
   getSubgraphState: (
     namespace: string[]
   ) => Partial<Record<string, unknown>> | undefined;
+  threadId: string | null;
   client: Client;
   assistantId: string;
 }
@@ -278,6 +286,9 @@ export function useStreamUI<
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
 
+  const messagesKeyRef = useRef(options.messagesKey ?? "messages");
+  messagesKeyRef.current = options.messagesKey ?? "messages";
+
   const fetchHistoryData = useCallback(
     (fetchThreadId: string | undefined | null, limit: boolean | number) => {
       const currentClient = clientRef.current;
@@ -287,6 +298,31 @@ export function useStreamUI<
         return fetchHistory<TState>(currentClient, fetchThreadId, { limit }).then(
           (data) => {
             registry.setHistory(data);
+
+            if (data.length > 0) {
+              const head = data[0];
+              const messagesKey = messagesKeyRef.current;
+              const rawMessages = head.values?.[messagesKey];
+              
+              const stateFromValues: Partial<TState> = {};
+              if (head.values) {
+                for (const [key, value] of Object.entries(head.values)) {
+                  if (key !== messagesKey) {
+                    (stateFromValues as Record<string, unknown>)[key] = value;
+                  }
+                }
+              }
+
+              if (Array.isArray(rawMessages)) {
+                const uiMessages = reconstructMessagesWithBlocks(
+                  rawMessages as HistoryMessage[]
+                );
+                registry.loadFromHistory(uiMessages, stateFromValues);
+              } else {
+                registry.loadFromHistory([], stateFromValues);
+              }
+            }
+
             registry.setIsHistoryLoading(false);
             return data;
           },
@@ -480,8 +516,14 @@ export function useStreamUI<
           if (submitOptions?.checkpoint === null) checkpoint = undefined;
           if (checkpoint != null) delete (checkpoint as Record<string, unknown>).thread_id;
 
+          const currentState = registry.getState();
+          const inputWithState = {
+            ...currentState,
+            ...values,
+          };
+
           return client.runs.stream(usableThreadId, options.assistantId, {
-            input: values as Record<string, unknown>,
+            input: inputWithState as Record<string, unknown>,
             config: submitOptions?.config,
             context: submitOptions?.context,
             command: submitOptions?.command,
@@ -565,6 +607,11 @@ export function useStreamUI<
     [registry]
   );
 
+  const setState = useCallback(
+    (partial: Partial<TState>) => registry.setState(partial),
+    [registry]
+  );
+
   const getSnapshot = useCallback(
     (): UISnapshot<TState, TSchema> => {
       const baseValues = registry.getValues();
@@ -617,14 +664,16 @@ export function useStreamUI<
         submit,
         stop,
         setBranch,
+        setState,
         getSubgraphState,
         client,
         assistantId: options.assistantId,
+        threadId,
       };
 
       return snapshot;
     },
-    [registry, getMessages, submit, stop, setBranch, getSubgraphState, client, options.assistantId]
+    [registry, getMessages, submit, stop, setBranch, setState, getSubgraphState, client, options.assistantId, threadId]
   );
 
   const result = useSmartSubscription(

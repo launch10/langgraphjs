@@ -26,14 +26,12 @@ type AdsState = {
   descriptions: Description[];
 } & Record<string, unknown>;
 
-const streamOptions: UseStreamUIOptions<AdsState> = {
-  apiUrl: "http://localhost:8080/api",
-  assistantId: "ads",
-  merge: {
-    headlines: MergeStrategies.appendUnique<Headline, "id">("id"),
-    descriptions: MergeStrategies.replace<Description[]>(),
-  } as Record<string, (incoming: unknown, current: unknown) => unknown>,
-};
+function getThreadIdFromUrl(): string | null {
+  const path = window.location.pathname;
+  if (path === "/" || path === "") return null;
+  const id = path.slice(1);
+  return id || null;
+}
 
 function HeadlinesPanel({
   headlines,
@@ -233,97 +231,67 @@ function Message({ message, isLoading }: { message: MessageWithBlocks; isLoading
   );
 }
 
-function HeadlinesWithSelector({ onToggleLock, isLoading }: { onToggleLock: (id: string) => void; isLoading: boolean }) {
-  console.log("[HeadlinesWithSelector] Rendering");
-  const headlines = useStreamUI<AdsState, unknown, Headline[]>(streamOptions, (s) => (s.values.headlines as Headline[]) ?? []);
-  const visibleHeadlines = headlines.filter((h: Headline) => !h.rejected);
-
-  return (
-    <div style={{ marginBottom: 16 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-        <span style={{ fontSize: 12, color: "#9ca3af" }}>
-          Headlines (selector) ({visibleHeadlines.length}):
-        </span>
-        {isLoading && <span style={{ fontSize: 11, color: "#facc15" }}>streaming...</span>}
-      </div>
-      <p style={{ fontSize: 11, color: "#6b7280", marginBottom: 8 }}>
-        This component only re-renders when headlines change
-      </p>
-      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-        {visibleHeadlines.map((h: Headline) => (
-          <div key={h.id} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <button
-              onClick={() => onToggleLock(h.id)}
-              style={{ background: "none", border: "none", cursor: "pointer", fontSize: 16, opacity: h.locked ? 1 : 0.4 }}
-              title={h.locked ? "Unlock headline" : "Lock headline"}
-            >
-              {h.locked ? "🔒" : "🔓"}
-            </button>
-            <span style={{ color: h.locked ? "#4ade80" : "#22c55e", fontWeight: h.locked ? 600 : 400 }}>{h.text}</span>
-          </div>
-        ))}
-        {visibleHeadlines.length === 0 && (
-          <div style={{ fontSize: 12, color: "#6b7280", fontStyle: "italic" }}>No headlines yet</div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function DescriptionsWithSelector({ isLoading }: { isLoading: boolean }) {
-  console.log("[DescriptionsWithSelector] Rendering");
-  const descriptions = useStreamUI<AdsState, unknown, Description[]>(streamOptions, (s) => (s.values.descriptions as Description[]) ?? []);
-
-  return (
-    <div>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-        <span style={{ fontSize: 12, color: "#9ca3af" }}>
-          Descriptions (selector) ({descriptions.length}):
-        </span>
-        {isLoading && <span style={{ fontSize: 11, color: "#facc15" }}>streaming...</span>}
-      </div>
-      <p style={{ fontSize: 11, color: "#6b7280", marginBottom: 8 }}>
-        This component only re-renders when descriptions change
-      </p>
-      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-        {descriptions.map((d: Description) => (
-          <div key={d.id} style={{ color: "#60a5fa", fontSize: 14 }}>{d.text}</div>
-        ))}
-        {descriptions.length === 0 && (
-          <div style={{ fontSize: 12, color: "#6b7280", fontStyle: "italic" }}>No descriptions yet</div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 function App() {
   const [input, setInput] = useState("premium organic coffee beans");
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [controlledThreadId, setControlledThreadId] = useState<string | null>(getThreadIdFromUrl);
 
-  const { values, uiMessages, submit, isLoading, error } = useStreamUI<AdsState>(streamOptions);
-  console.log(uiMessages)
+  const handleThreadId = useCallback((newThreadId: string) => {
+    setControlledThreadId(newThreadId);
+    window.history.pushState({}, "", `/${newThreadId}`);
+  }, []);
+
+  const streamOptions: UseStreamUIOptions<AdsState> = {
+    apiUrl: "http://localhost:8080/api",
+    assistantId: "ads",
+    threadId: controlledThreadId,
+    onThreadId: handleThreadId,
+    fetchStateHistory: true,
+    merge: {
+      headlines: MergeStrategies.appendUnique<Headline, "id">("id"),
+      descriptions: MergeStrategies.replace<Description[]>(),
+    } as Record<string, (incoming: unknown, current: unknown) => unknown>,
+  };
+
+  const { values, uiMessages, submit, isLoading, error, setState, threadId } = useStreamUI<AdsState>(streamOptions);
 
   const headlines = (values.headlines as Headline[]) ?? [];
   const descriptions = (values.descriptions as Description[]) ?? [];
+  const lockedHeadlines = headlines.filter((h) => h.locked);
 
   const handleSubmit = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
       if (!input.trim()) return;
-      submit({ messages: [{ role: "user", content: input }] });
+
+      submit(
+        { messages: [{ role: "user", content: input }] },
+        { optimisticMessage: input }
+      );
       setInput("");
     },
     [input, submit]
   );
 
   const handleToggleLock = useCallback((id: string) => {
-    console.log("Toggle lock for:", id);
-  }, []);
+    const updated = headlines.map((h) =>
+      h.id === id ? { ...h, locked: !h.locked } : h
+    );
+    setState({ headlines: updated });
+  }, [headlines, setState]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [uiMessages]);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const newThreadId = getThreadIdFromUrl();
+      setControlledThreadId(newThreadId);
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
 
   return (
     <div style={{ maxWidth: 700, margin: "0 auto", padding: 20, fontFamily: "system-ui, sans-serif" }}>
@@ -334,13 +302,14 @@ function App() {
 
       <div style={{ marginBottom: 10, fontSize: 12, color: "#9ca3af" }}>
         Status: {isLoading ? "streaming..." : "ready"}
+        {threadId && <span> | Thread: {threadId.slice(0, 8)}...</span>}
         {error ? <span style={{ color: "#ef4444" }}> Error: {String(error)}</span> : null}
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
         <div style={{ padding: 16, background: "#1f2937", borderRadius: 8, border: "1px solid #374151" }}>
           <div style={{ fontSize: 14, fontWeight: 600, color: "#d1d5db", marginBottom: 12 }}>
-            Traditional (re-renders on all state changes)
+            Headlines &amp; Descriptions
           </div>
           <HeadlinesPanel headlines={headlines} onToggleLock={handleToggleLock} isLoading={isLoading} />
           <DescriptionsPanel descriptions={descriptions} isLoading={isLoading} />
@@ -348,13 +317,23 @@ function App() {
 
         <div style={{ padding: 16, background: "#1a2e1a", borderRadius: 8, border: "1px solid #2d5a2d" }}>
           <div style={{ fontSize: 14, fontWeight: 600, color: "#86efac", marginBottom: 12 }}>
-            Selector Pattern (optimized re-renders)
+            Locked Headlines ({lockedHeadlines.length})
           </div>
           <p style={{ fontSize: 11, color: "#6b7280", marginBottom: 16 }}>
-            Each component only re-renders when its specific data changes. Check console to see the difference.
+            These will be preserved on next generation
           </p>
-          <HeadlinesWithSelector onToggleLock={handleToggleLock} isLoading={isLoading} />
-          <DescriptionsWithSelector isLoading={isLoading} />
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            {lockedHeadlines.map((h) => (
+              <div key={h.id} style={{ color: "#4ade80", fontSize: 14, fontWeight: 600 }}>
+                {h.text}
+              </div>
+            ))}
+            {lockedHeadlines.length === 0 && (
+              <div style={{ fontSize: 12, color: "#6b7280", fontStyle: "italic" }}>
+                No locked headlines
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

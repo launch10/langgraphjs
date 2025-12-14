@@ -401,6 +401,15 @@ export class SharedChatRegistry<TState extends Record<string, unknown>> {
     this.notifyStateSubscribers();
   }
 
+  setState(partial: Partial<TState>): void {
+    const changedKeys = Object.keys(partial);
+    this.uiState = { ...this.uiState, ...partial };
+    this.notifyStateSubscribers();
+    for (const key of changedKeys) {
+      this.notifyStateKeySubscribers(key);
+    }
+  }
+
   clear(): void {
     this.streamValues = null;
     this.streamError = undefined;
