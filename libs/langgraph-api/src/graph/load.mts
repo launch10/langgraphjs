@@ -12,8 +12,29 @@ import { HTTPException } from "hono/http-exception";
 import { type CompiledGraphFactory, resolveGraph } from "./load.utils.mjs";
 import type { GraphSchema, GraphSpec } from "./parser/index.mjs";
 import { getStaticGraphSchema } from "./parser/index.mjs";
-import { checkpointer } from "../storage/checkpoint.mjs";
-import { store } from "../storage/store.mjs";
+import { checkpointer as fileCheckpointer } from "../storage/checkpoint.mjs";
+import { store as fileStore } from "../storage/store.mjs";
+
+// Default checkpointer and store - can be overridden by setDefaults()
+let defaultCheckpointer: BaseCheckpointSaver | undefined = fileCheckpointer;
+let defaultStore: BaseStore | undefined = fileStore;
+
+/**
+ * Set the default checkpointer and store for all graphs.
+ * Called by server.mts to override file-based defaults with postgres versions.
+ * Pass null to explicitly disable (don't fall back to file-based).
+ */
+export function setDefaults(options: {
+  checkpointer?: BaseCheckpointSaver | null;
+  store?: BaseStore | null;
+}) {
+  if ("checkpointer" in options) {
+    defaultCheckpointer = options.checkpointer ?? undefined;
+  }
+  if ("store" in options) {
+    defaultStore = options.store ?? undefined;
+  }
+}
 import { logger } from "../logging.mjs";
 
 export const GRAPHS: Record<
@@ -81,7 +102,7 @@ export async function getGraph(
   config: LangGraphRunnableConfig | undefined,
   options?: {
     checkpointer?: BaseCheckpointSaver | null;
-    store?: BaseStore;
+    store?: BaseStore | null;
   }
 ) {
   assertGraphExists(graphId);
@@ -91,13 +112,19 @@ export async function getGraph(
       ? await GRAPHS[graphId](config ?? { configurable: {} })
       : GRAPHS[graphId];
 
-  if (typeof options?.checkpointer !== "undefined") {
-    compiled.checkpointer = options?.checkpointer ?? undefined;
+  // Use "in" check to detect if key was explicitly passed (even as undefined/null)
+  // This prevents falling back to defaults when caller explicitly passes undefined
+  if (options && "checkpointer" in options) {
+    compiled.checkpointer = options.checkpointer ?? undefined;
   } else {
-    compiled.checkpointer = checkpointer;
+    compiled.checkpointer = defaultCheckpointer;
   }
 
-  compiled.store = options?.store ?? store;
+  if (options && "store" in options) {
+    compiled.store = options.store === null ? undefined : options.store;
+  } else {
+    compiled.store = defaultStore;
+  }
 
   return compiled;
 }

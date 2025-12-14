@@ -21,6 +21,13 @@ if (typeof config.env === "string") {
   env = config.env;
 }
 
+const storageType = process.env.STORAGE_TYPE ?? "postgres";
+const postgresUri =
+  storageType === "postgres"
+    ? process.env.POSTGRES_URI ??
+      "postgres://user:password@127.0.0.1:5434/testdb?sslmode=disable"
+    : undefined;
+
 const { spawnServer } = (
   process.argv.includes("--dev")
     ? await import("../src/cli/spawn.mjs")
@@ -33,6 +40,7 @@ const server = await spawnServer(
     port: process.env.PORT || "2024",
     nJobsPerWorker: "10",
     host: "localhost",
+    ...(postgresUri && { postgresUri }),
   },
   { config, env, hostUrl: "https://smith.langchain.com" },
   { pid: process.pid, projectCwd: dirname(configPath) }

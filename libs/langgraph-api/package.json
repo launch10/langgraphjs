@@ -43,6 +43,46 @@
       "types": "./dist/experimental/embed.d.mts",
       "default": "./dist/experimental/embed.mjs"
     },
+    "./storage/postgres": {
+      "types": "./dist/storage/postgres/index.d.mts",
+      "default": "./dist/storage/postgres/index.mjs"
+    },
+    "./storage/redis": {
+      "types": "./dist/storage/redis/index.d.mts",
+      "default": "./dist/storage/redis/index.mjs"
+    },
+    "./api/runs": {
+      "types": "./dist/api/runs.d.mts",
+      "default": "./dist/api/runs.mjs"
+    },
+    "./api/threads": {
+      "types": "./dist/api/threads.d.mts",
+      "default": "./dist/api/threads.mjs"
+    },
+    "./api/assistants": {
+      "types": "./dist/api/assistants.d.mts",
+      "default": "./dist/api/assistants.mjs"
+    },
+    "./api/store": {
+      "types": "./dist/api/store.d.mts",
+      "default": "./dist/api/store.mjs"
+    },
+    "./api/meta": {
+      "types": "./dist/api/meta.d.mts",
+      "default": "./dist/api/meta.mjs"
+    },
+    "./http/middleware": {
+      "types": "./dist/http/middleware.d.mts",
+      "default": "./dist/http/middleware.mjs"
+    },
+    "./queue": {
+      "types": "./dist/queue.d.mts",
+      "default": "./dist/queue.mjs"
+    },
+    "./app": {
+      "types": "./dist/app.d.mts",
+      "default": "./dist/app.mjs"
+    },
     "./package.json": "./package.json"
   },
   "repository": {
@@ -58,6 +98,7 @@
     "prepublish": "yarn build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:int": "vitest run --mode int",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },
@@ -74,6 +115,7 @@
     "hono": "^4.5.4",
     "langsmith": "^0.3.33",
     "open": "^10.1.0",
+    "pg": "^8.13.0",
     "semver": "^7.7.1",
     "stacktrace-parser": "^0.1.10",
     "superjson": "^2.2.2",
@@ -87,11 +129,23 @@
     "@langchain/core": "^0.3.59 || ^1.0.1",
     "@langchain/langgraph": "^0.2.57 || ^0.3.0 || ^0.4.0 || ^1.0.0-alpha || ^1.0.0",
     "@langchain/langgraph-checkpoint": "~0.0.16 || ^0.1.0 || ~1.0.0",
+    "@langchain/langgraph-checkpoint-postgres": "^0.1.0",
+    "@langchain/langgraph-postgres": "^0.0.1",
     "@langchain/langgraph-sdk": "~0.0.16 || ^0.1.0 || ^1.0.0",
+    "redis": "^4.7.0",
     "typescript": "^5.5.4"
   },
   "peerDependenciesMeta": {
+    "@langchain/langgraph-checkpoint-postgres": {
+      "optional": true
+    },
+    "@langchain/langgraph-postgres": {
+      "optional": true
+    },
     "@langchain/langgraph-sdk": {
+      "optional": true
+    },
+    "redis": {
       "optional": true
     }
   },
@@ -99,9 +153,11 @@
     "@langchain/core": "^1.0.0",
     "@langchain/langgraph": "workspace:*",
     "@langchain/langgraph-checkpoint": "workspace:*",
+    "@langchain/langgraph-checkpoint-postgres": "workspace:*",
     "@langchain/langgraph-sdk": "workspace:*",
     "@types/babel__code-frame": "^7.0.6",
     "@types/node": "^18.15.11",
+    "@types/pg": "^8.11.6",
     "@types/react": "^19.0.8",
     "@types/react-dom": "^19.0.3",
     "@types/semver": "^7.7.0",
@@ -109,6 +165,8 @@
     "jose": "^6.0.10",
     "postgres": "^3.4.5",
     "prettier": "^2.8.3",
+    "redis": "^4.7.0",
+    "testcontainers": "^10.0.0",
     "typescript": "^4.9.5 || ^5.4.5",
     "vitest": "^3.2.4",
     "wait-port": "^1.1.0"

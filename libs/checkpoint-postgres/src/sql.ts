@@ -20,6 +20,7 @@ export type SQL_TYPES = {
     thread_id: string;
     checkpoint_ns: string;
     checkpoint_id: string;
+    run_id: string | null;
     metadata: Record<string, unknown>;
     pending_writes: [Uint8Array, Uint8Array, Uint8Array, Uint8Array][];
   };
@@ -65,6 +66,7 @@ export const getSQLStatements = (schema: string): SQL_STATEMENTS => {
     checkpoint_ns,
     checkpoint_id,
     parent_checkpoint_id,
+    run_id,
     metadata,
     (
       select array_agg(array[bl.channel::bytea, bl.type::bytea, bl.blob])
@@ -100,12 +102,13 @@ export const getSQLStatements = (schema: string): SQL_STATEMENTS => {
   ON CONFLICT (thread_id, checkpoint_ns, channel, version) DO NOTHING
   `,
 
-    UPSERT_CHECKPOINTS_SQL: `INSERT INTO ${SCHEMA_TABLES.checkpoints} (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, checkpoint, metadata)
-  VALUES ($1, $2, $3, $4, $5, $6)
+    UPSERT_CHECKPOINTS_SQL: `INSERT INTO ${SCHEMA_TABLES.checkpoints} (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, checkpoint, metadata, run_id)
+  VALUES ($1, $2, $3, $4, $5, $6, $7)
   ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id)
   DO UPDATE SET
     checkpoint = EXCLUDED.checkpoint,
-    metadata = EXCLUDED.metadata;
+    metadata = EXCLUDED.metadata,
+    run_id = EXCLUDED.run_id;
   `,
 
     UPSERT_CHECKPOINT_WRITES_SQL: `INSERT INTO ${SCHEMA_TABLES.checkpoint_writes} (thread_id, checkpoint_ns, checkpoint_id, task_id, idx, channel, type, blob)

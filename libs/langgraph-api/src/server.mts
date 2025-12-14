@@ -2,7 +2,7 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { contextStorage } from "hono/context-storage";
 
-import { registerFromEnv } from "./graph/load.mjs";
+import { registerFromEnv, setDefaults } from "./graph/load.mjs";
 
 import runs from "./api/runs.mjs";
 import threads from "./api/threads.mjs";
@@ -72,6 +72,8 @@ export const StartServerSchema = z.object({
         .optional(),
     })
     .optional(),
+  postgresUri: z.string().optional(),
+  redisUrl: z.string().optional(),
 });
 
 export async function startServer(
@@ -93,31 +95,68 @@ export async function startServer(
   }
 
   logger.info(`Initializing storage...`);
-  let initCalls: Promise<FileSystemPersistence<unknown>>[] = [
-    checkpointer.initialize(options.cwd),
-    graphStore.initialize(options.cwd),
-  ];
+  let initCalls: Promise<FileSystemPersistence<unknown>>[] = [];
+  let postgresOps: import("./storage/postgres/ops.mjs").PostgresOps | null =
+    null;
 
   let ops = storage?.ops;
   if (ops == null) {
-    const opsConn = new FileSystemPersistence<Store>(
-      ".langgraphjs_ops.json",
-      () => ({
-        runs: {},
-        threads: {},
-        assistants: {},
-        assistant_versions: [],
-        retry_counter: {},
-      })
-    );
-    initCalls.push(opsConn.initialize(options.cwd));
-    ops = new FileSystemOps(opsConn);
+    if (options.postgresUri) {
+      logger.info(
+        `Using PostgreSQL storage: ${options.postgresUri.replace(
+          /\/\/[^:]+:[^@]+@/,
+          "//***:***@"
+        )}`
+      );
+      if (options.redisUrl) {
+        logger.info(`Using Redis for horizontal scaling`);
+      }
+      const { createPostgresOps } = await import(
+        "./storage/postgres/index.mjs"
+      );
+      postgresOps = await createPostgresOps({
+        postgresUri: options.postgresUri,
+        redisUrl: options.redisUrl,
+      });
+      ops = postgresOps;
+
+      // Set postgres checkpointer and store as the defaults for all graphs
+      // Both are required for postgres mode - getStore() throws if PostgresStore not installed
+      const postgresCheckpointer = await postgresOps.getCheckpointer();
+      const postgresStore = await postgresOps.getStore();
+      setDefaults({
+        checkpointer: postgresCheckpointer,
+        store: postgresStore,
+      });
+      logger.info("Postgres checkpointer and store initialized as defaults");
+    } else {
+      initCalls = [
+        checkpointer.initialize(options.cwd),
+        graphStore.initialize(options.cwd),
+      ];
+      const opsConn = new FileSystemPersistence<Store>(
+        ".langgraphjs_ops.json",
+        () => ({
+          runs: {},
+          threads: {},
+          assistants: {},
+          assistant_versions: [],
+          retry_counter: {},
+        })
+      );
+      initCalls.push(opsConn.initialize(options.cwd));
+      ops = new FileSystemOps(opsConn);
+    }
   }
   const callbacks = await Promise.all(initCalls);
 
   const cleanup = async () => {
     logger.info(`Flushing to persistent storage, exiting...`);
-    await Promise.all(callbacks.map((c) => c.flush()));
+    if (postgresOps != null) {
+      await postgresOps.shutdown();
+    } else {
+      await Promise.all(callbacks.map((c) => c.flush()));
+    }
   };
 
   // Register global logger that can be consumed via SDK
@@ -175,13 +214,21 @@ export async function startServer(
         assistants: z.boolean().optional(),
         checkpointer: z.boolean().optional(),
         store: z.boolean().optional(),
+        full: z.boolean().optional(),
       })
     ),
-    (c) => {
-      const { runs, threads, assistants, checkpointer, store } =
+    async (c) => {
+      const { runs, threads, assistants, checkpointer, store, full } =
         c.req.valid("json");
 
-      ops.truncate({ runs, threads, assistants, checkpointer, store });
+      await ops.truncate({
+        runs,
+        threads,
+        assistants,
+        checkpointer,
+        store,
+        full,
+      });
       return c.json({ ok: true });
     }
   );

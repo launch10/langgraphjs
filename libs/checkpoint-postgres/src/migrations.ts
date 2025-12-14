@@ -41,5 +41,6 @@ export const getMigrations = (schema: string) => {
     PRIMARY KEY (thread_id, checkpoint_ns, checkpoint_id, task_id, idx)
   );`,
     `ALTER TABLE ${SCHEMA_TABLES.checkpoint_blobs} ALTER COLUMN blob DROP not null;`,
+    `ALTER TABLE ${SCHEMA_TABLES.checkpoints} ADD COLUMN IF NOT EXISTS run_id TEXT;`,
   ];
 };

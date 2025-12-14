@@ -405,7 +405,6 @@ export function createEmbedServer(options: {
         try {
           for await (const { event, data } of streamState(run, {
             attempt: 1,
-            getGraph,
             signal,
           })) {
             await stream.writeSSE({ data: serialiseAsDict(data), event });
@@ -440,7 +439,6 @@ export function createEmbedServer(options: {
         try {
           for await (const { event, data } of streamState(run, {
             attempt: 1,
-            getGraph,
             signal,
           })) {
             await stream.writeSSE({ data: serialiseAsDict(data), event });

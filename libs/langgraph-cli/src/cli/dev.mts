@@ -30,6 +30,10 @@ builder
     "--tunnel",
     "use Cloudflare Tunnel to expose the server to the internet"
   )
+  .option(
+    "--postgres-uri <uri>",
+    "PostgreSQL connection URI for persistent storage (e.g., postgresql://user:pass@localhost:5432/db)"
+  )
   .allowExcessArguments()
   .allowUnknownOption()
   .exitOverride((error) => gracefulExit(error.exitCode))
@@ -164,7 +168,7 @@ builder
         } else {
           const { spawnServer } = await import("@langchain/langgraph-api");
           child = await spawnServer(
-            options,
+            { ...options, postgresUri: options.postgresUri },
             { config, env, hostUrl },
             { pid, projectCwd }
           );
