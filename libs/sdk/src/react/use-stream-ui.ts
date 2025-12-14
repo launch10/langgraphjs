@@ -244,7 +244,6 @@ export function useStreamUI<
     });
     registryRef.current = reg;
     registryKeyRef.current = reg.getKey();
-    console.log("[useStreamUI] created registry with key:", reg.getKey(), "selector:", !!selector, "initialThreadId:", initialThreadId);
   }
 
   const registry = registryRef.current;
@@ -360,11 +359,8 @@ export function useStreamUI<
         ) => void;
       }
     ) => {
-      console.log("[useStreamUI] processCustomEvent called:", data);
       if (isUIEvent(data)) {
-        console.log("[useStreamUI] isUIEvent=true, processing");
         const result = processorRef.current.process(data);
-        console.log("[useStreamUI] processor result:", result);
         applyProcessedResult(result);
       }
 
@@ -410,7 +406,6 @@ export function useStreamUI<
       values: Partial<TState> | null | undefined,
       submitOptions?: UISubmitOptions<TState>
     ) => {
-      console.log("[useStreamUI] submit called with values:", values);
       const checkpointId = submitOptions?.checkpoint?.checkpoint_id;
       setBranch(
         checkpointId != null
@@ -510,12 +505,9 @@ export function useStreamUI<
           initialValues: historyValues,
           callbacks: {
             onCustomEvent: processCustomEvent,
-            onUpdateEvent: (data, opts) => {
-              console.log("[useStreamUI] onUpdateEvent:", data);
-            },
+            onUpdateEvent: () => {},
           },
           async onSuccess() {
-            console.log("[useStreamUI] onSuccess called");
             if (onFinish || historyLimit) {
               const newHistory = await fetchHistoryData(usableThreadId!, historyLimit);
               const lastHead = newHistory?.at(0);
@@ -559,7 +551,6 @@ export function useStreamUI<
 
   useEffect(() => {
     const unsubscribe = stream.subscribe(() => {
-      console.log("[useStreamUI] stream.subscribe callback - values:", stream.values, "isLoading:", stream.isLoading);
       registry.setStreamValues(stream.values);
       registry.setIsLoading(stream.isLoading);
       if (stream.error) {
@@ -576,14 +567,14 @@ export function useStreamUI<
 
   const getSnapshot = useCallback(
     (): UISnapshot<TState, TSchema> => {
-      const values = registry.getValues();
+      const baseValues = registry.getValues();
       const error = registry.getError();
       const isLoading = registry.getIsLoading();
       const isHistoryLoading = registry.getIsHistoryLoading();
       const state = registry.getState();
+      const values = { ...baseValues, ...state } as TState;
       const uiMessages = registry.getMessages() as MessageWithBlocks<TSchema>[];
       const tools = registry.getTools();
-      console.log("[useStreamUI] getSnapshot - values:", values, "state:", state, "uiMessages:", uiMessages);
       const currentBranch = branchRef.current;
       const currentHistory = registry.getHistory();
       const currentBranchContext = getBranchContext(currentBranch, currentHistory.length > 0 ? currentHistory : undefined);

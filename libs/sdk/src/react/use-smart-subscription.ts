@@ -72,14 +72,10 @@ export function useSmartSubscription<
   const checkForUpdates = useCallback(() => {
     const snapshot = getSnapshot();
     const newSelected = selector ? selector(snapshot) : snapshot;
-    console.log("[useSmartSubscription] checkForUpdates - newSelected:", newSelected, "lastSelected:", lastSelectedRef.current, "snapshot.values:", (snapshot as Record<string, unknown>).values);
 
     if (!shallowEqual(lastSelectedRef.current, newSelected)) {
-      console.log("[useSmartSubscription] triggering re-render");
       lastSelectedRef.current = newSelected;
       forceRender();
-    } else {
-      console.log("[useSmartSubscription] shallowEqual=true, skipping re-render");
     }
   }, [getSnapshot, selector]);
 
