@@ -1,19 +1,23 @@
-import { useCallback, useEffect, useRef, useMemo, useReducer } from "react";
-import { useStream } from "./stream.js";
-import type {
-  UseStreamOptions,
-  UseStream,
-  BagTemplate,
-  SubmitOptions,
-} from "./types.js";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
+import { Client, getClientConfigHash } from "../client.js";
+import type { ClientConfig } from "../client.js";
+import { StreamManager, EventStreamEvent } from "../ui/manager.js";
+import { MessageTupleManager } from "../ui/messages.js";
+import { getBranchContext } from "../ui/branching.js";
+import { unique } from "../ui/utils.js";
+import { useControllableThreadId } from "./thread.js";
 import {
   UIEventProcessor,
   type ProcessedResult,
 } from "../ui/streaming/processor.js";
-import {
-  SharedChatRegistry,
-  type RegistryOptions,
-} from "../ui/streaming/registry.js";
+import { SharedChatRegistry } from "../ui/streaming/registry.js";
 import type {
   MessageWithBlocks,
   StructuredBlock,
@@ -21,12 +25,28 @@ import type {
   MergeReducers,
 } from "../ui/streaming/types.js";
 import { isUIEvent } from "../ui/streaming/types.js";
+import type { Message } from "../types.messages.js";
+import type { ThreadState, Interrupt, Checkpoint , Metadata , Config } from "../schema.js";
+import type { StreamMode } from "../types.stream.js";
+import type { Command, MultitaskStrategy, OnCompletionBehavior, DisconnectMode, Durability } from "../types.js";
+import type { Sequence } from "../ui/branching.js";
 
 export interface UseStreamUIOptions<
   TState extends Record<string, unknown>,
   TSchema = unknown,
-  Bag extends BagTemplate = BagTemplate,
-> extends Omit<UseStreamOptions<TState, Bag>, "onCustomEvent"> {
+> {
+  assistantId: string;
+  client?: Client;
+  apiUrl?: ClientConfig["apiUrl"];
+  apiKey?: ClientConfig["apiKey"];
+  callerOptions?: ClientConfig["callerOptions"];
+  defaultHeaders?: ClientConfig["defaultHeaders"];
+  messagesKey?: string;
+  threadId?: string | null;
+  onThreadId?: (threadId: string) => void;
+  initialValues?: TState | null;
+  fetchStateHistory?: boolean | { limit: number };
+  throttle?: number | boolean;
   schema?: TSchema;
   jsonTarget?: "messages" | "state";
   merge?: MergeReducers<TState>;
@@ -34,6 +54,8 @@ export interface UseStreamUIOptions<
   onStructuredBlock?: (block: StructuredBlock<TSchema>) => void;
   onToolUpdate?: (tool: ToolState) => void;
   onUIError?: (error: Error) => void;
+  onError?: (error: unknown) => void;
+  onFinish?: (state: ThreadState<TState>) => void;
   onCustomEvent?: (
     data: unknown,
     options: {
@@ -48,15 +70,39 @@ export interface UseStreamUIOptions<
 export interface UISubmitOptions<
   TState extends Record<string, unknown>,
   ConfigurableType extends Record<string, unknown> = Record<string, unknown>,
-> extends SubmitOptions<TState, ConfigurableType> {
+> {
+  config?: Config & { configurable?: ConfigurableType };
+  context?: ConfigurableType;
+  checkpoint?: Omit<Checkpoint, "thread_id"> | null;
+  command?: Command;
+  interruptBefore?: "*" | string[];
+  interruptAfter?: "*" | string[];
+  metadata?: Metadata;
+  multitaskStrategy?: MultitaskStrategy;
+  onCompletion?: OnCompletionBehavior;
+  onDisconnect?: DisconnectMode;
+  streamMode?: Array<StreamMode>;
+  streamSubgraphs?: boolean;
+  streamResumable?: boolean;
+  durability?: Durability;
+  threadId?: string;
+  optimisticValues?: Partial<TState> | ((prev: TState) => Partial<TState>);
   optimisticMessage?: string;
 }
 
-export interface UseStreamUIResult<
+export interface UISnapshot<
   TState extends Record<string, unknown>,
   TSchema = unknown,
-  Bag extends BagTemplate = BagTemplate,
-> extends Omit<UseStream<TState, Bag>, "submit"> {
+> {
+  values: TState;
+  error: unknown;
+  isLoading: boolean;
+  isThreadLoading: boolean;
+  branch: string;
+  history: ThreadState<TState>[];
+  experimental_branchTree: Sequence<TState>;
+  interrupt: Interrupt | undefined;
+  messages: Message[];
   state: Partial<TState>;
   uiMessages: MessageWithBlocks<TSchema>[];
   tools: ToolState[];
@@ -64,9 +110,66 @@ export interface UseStreamUIResult<
     values: Partial<TState> | null | undefined,
     options?: UISubmitOptions<TState>
   ) => Promise<void>;
+  stop: () => Promise<void>;
+  setBranch: (branch: string) => void;
   getSubgraphState: (
     namespace: string[]
   ) => Partial<Record<string, unknown>> | undefined;
+  client: Client;
+  assistantId: string;
+}
+
+export interface UseStreamUIResult<
+  TState extends Record<string, unknown>,
+  TSchema = unknown,
+> {
+  values: TState;
+  error: unknown;
+  isLoading: boolean;
+  isThreadLoading: boolean;
+  branch: string;
+  history: ThreadState<TState>[];
+  experimental_branchTree: Sequence<TState>;
+  interrupt: Interrupt | undefined;
+  messages: Message[];
+  state: Partial<TState>;
+  uiMessages: MessageWithBlocks<TSchema>[];
+  tools: ToolState[];
+  submit: (
+    values: Partial<TState> | null | undefined,
+    options?: UISubmitOptions<TState>
+  ) => Promise<void>;
+  stop: () => Promise<void>;
+  setBranch: (branch: string) => void;
+  getSubgraphState: (
+    namespace: string[]
+  ) => Partial<Record<string, unknown>> | undefined;
+  client: Client;
+  assistantId: string;
+}
+
+function getFetchHistoryKey(
+  client: Client,
+  threadId: string | undefined | null,
+  limit: boolean | number
+) {
+  return [getClientConfigHash(client), threadId, limit].join(":");
+}
+
+function fetchHistory<StateType extends Record<string, unknown>>(
+  client: Client,
+  threadId: string,
+  options?: { limit?: boolean | number }
+) {
+  if (options?.limit === false) {
+    return client.threads.getState<StateType>(threadId).then((state) => {
+      if (state.checkpoint == null) return [];
+      return [state];
+    });
+  }
+
+  const limit = typeof options?.limit === "number" ? options.limit : 10;
+  return client.threads.getHistory<StateType>(threadId, { limit });
 }
 
 function shallowEqual<T>(a: T, b: T): boolean {
@@ -85,7 +188,7 @@ function shallowEqual<T>(a: T, b: T): boolean {
 
   if (aIsArray && bIsArray) {
     if (a.length !== b.length) return false;
-    for (let i = 0; i < a.length; i++) {
+    for (let i = 0; i < a.length; i += 1) {
       if (!Object.is(a[i], b[i])) return false;
     }
     return true;
@@ -112,10 +215,27 @@ function shallowEqual<T>(a: T, b: T): boolean {
 export function useStreamUI<
   TState extends Record<string, unknown>,
   TSchema = unknown,
-  Bag extends BagTemplate = BagTemplate,
 >(
-  options: UseStreamUIOptions<TState, TSchema, Bag>
-): UseStreamUIResult<TState, TSchema, Bag> {
+  options: UseStreamUIOptions<TState, TSchema>
+): UseStreamUIResult<TState, TSchema>;
+
+export function useStreamUI<
+  TState extends Record<string, unknown>,
+  TSchema = unknown,
+  TSelected = unknown,
+>(
+  options: UseStreamUIOptions<TState, TSchema>,
+  selector: (snapshot: UISnapshot<TState, TSchema>) => TSelected
+): TSelected;
+
+export function useStreamUI<
+  TState extends Record<string, unknown>,
+  TSchema = unknown,
+  TSelected = unknown,
+>(
+  options: UseStreamUIOptions<TState, TSchema>,
+  selector?: (snapshot: UISnapshot<TState, TSchema>) => TSelected
+): UseStreamUIResult<TState, TSchema> | TSelected {
   const {
     merge,
     onStateUpdate,
@@ -123,25 +243,38 @@ export function useStreamUI<
     onToolUpdate,
     onUIError,
     onCustomEvent: userOnCustomEvent,
-    ...streamOptions
+    onError,
+    onFinish,
   } = options;
 
-  const [, forceRender] = useReducer((x: number) => x + 1, 0);
+  const client = useMemo(
+    () =>
+      options.client ??
+      new Client({
+        apiUrl: options.apiUrl,
+        apiKey: options.apiKey,
+        callerOptions: options.callerOptions,
+        defaultHeaders: options.defaultHeaders,
+      }),
+    [
+      options.client,
+      options.apiKey,
+      options.apiUrl,
+      options.callerOptions,
+      options.defaultHeaders,
+    ]
+  );
 
-  const mergeRef = useRef(merge);
-  mergeRef.current = merge;
-
-  const registryKey = `${streamOptions.apiUrl ?? ""}:${streamOptions.threadId ?? ""}`;
+  const [threadId, onThreadIdChange] = useControllableThreadId(options);
 
   const registry = useMemo(
     () =>
       SharedChatRegistry.getOrCreate<TState>({
-        apiUrl: streamOptions.apiUrl ?? "",
-        threadId: streamOptions.threadId ?? undefined,
-        merge: mergeRef.current,
+        apiUrl: options.apiUrl ?? "",
+        threadId: threadId ?? undefined,
+        merge,
       }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [registryKey]
+    [merge, options.apiUrl, threadId]
   );
 
   useEffect(() => {
@@ -149,49 +282,88 @@ export function useStreamUI<
     return () => SharedChatRegistry.release(registry);
   }, [registry]);
 
-  const processorRef = useRef<UIEventProcessor<TState>>(
-    new UIEventProcessor({
-      onError: onUIError,
-    })
+  const [branch, setBranch] = useState<string>("");
+
+  const [messageManager] = useState(() => new MessageTupleManager());
+  const [stream] = useState(
+    () =>
+      new StreamManager<TState, Record<string, unknown>>(messageManager, {
+        throttle: options.throttle ?? false,
+      })
   );
 
-  const lastStateRef = useRef<Partial<TState>>({});
-  const lastMessagesRef = useRef<MessageWithBlocks<TSchema>[]>([]);
-  const lastToolsRef = useRef<ToolState[]>([]);
-
-  const checkForUpdates = useCallback(() => {
-    const newState = registry.getState();
-    const newMessages = registry.getMessages() as MessageWithBlocks<TSchema>[];
-    const newTools = registry.getTools();
-
-    const stateChanged = !shallowEqual(lastStateRef.current, newState);
-    const messagesChanged = !shallowEqual(lastMessagesRef.current, newMessages);
-    const toolsChanged = !shallowEqual(lastToolsRef.current, newTools);
-
-    if (stateChanged || messagesChanged || toolsChanged) {
-      lastStateRef.current = newState;
-      lastMessagesRef.current = newMessages;
-      lastToolsRef.current = newTools;
-      forceRender();
-    }
-  }, [registry]);
+  const threadIdRef = useRef<string | null>(threadId);
+  const threadIdStreamingRef = useRef<string | null>(null);
 
   useEffect(() => {
-    const unsubs: Array<() => void> = [];
-    unsubs.push(registry.subscribeState(checkForUpdates));
-    unsubs.push(registry.subscribeMessages(checkForUpdates));
-    unsubs.push(registry.subscribeTools(checkForUpdates));
-    return () => unsubs.forEach((fn) => fn());
-  }, [registry, checkForUpdates]);
+    if (threadIdRef.current !== threadId) {
+      threadIdRef.current = threadId;
+      stream.clear();
+      registry.clear();
+    }
+  }, [threadId, stream, registry]);
+
+  const historyLimit =
+    typeof options.fetchStateHistory === "object" &&
+    options.fetchStateHistory != null
+      ? options.fetchStateHistory.limit ?? false
+      : options.fetchStateHistory ?? false;
+
+  const historyKey = getFetchHistoryKey(client, threadId, historyLimit);
+
+  const clientRef = useRef(client);
+  clientRef.current = client;
+
+  const onErrorRef = useRef(onError);
+  onErrorRef.current = onError;
+
+  const fetchHistoryData = useCallback(
+    (fetchThreadId: string | undefined | null, limit: boolean | number) => {
+      const currentClient = clientRef.current;
+
+      if (fetchThreadId != null) {
+        registry.setIsHistoryLoading(true);
+        return fetchHistory<TState>(currentClient, fetchThreadId, { limit }).then(
+          (data) => {
+            registry.setHistory(data);
+            registry.setIsHistoryLoading(false);
+            return data;
+          },
+          (fetchError) => {
+            registry.setError(fetchError);
+            registry.setIsHistoryLoading(false);
+            onErrorRef.current?.(fetchError);
+            return Promise.reject(fetchError);
+          }
+        );
+      }
+
+      registry.setHistory([]);
+      registry.setIsHistoryLoading(false);
+      return Promise.resolve([]);
+    },
+    [registry]
+  );
+
+  useEffect(() => {
+    if (
+      threadIdStreamingRef.current != null &&
+      threadIdStreamingRef.current === threadId
+    ) {
+      return;
+    }
+    void fetchHistoryData(threadId, historyLimit);
+  }, [fetchHistoryData, historyKey, threadId, historyLimit]);
+
+  const processorRef = useRef<UIEventProcessor<TState>>(
+    new UIEventProcessor({ onError: onUIError })
+  );
 
   const applyProcessedResult = useCallback(
     (result: ProcessedResult<TState>) => {
       if (result.stateUpdates) {
         for (const [key, value] of Object.entries(result.stateUpdates)) {
-          registry.updateState(
-            key as keyof TState,
-            value as TState[keyof TState]
-          );
+          registry.updateState(key as keyof TState, value as TState[keyof TState]);
           onStateUpdate?.(key as keyof TState, value as TState[keyof TState]);
         }
       }
@@ -216,7 +388,7 @@ export function useStreamUI<
     [registry, onStateUpdate, onStructuredBlock, onToolUpdate]
   );
 
-  const handleCustomEvent = useCallback(
+  const processCustomEvent = useCallback(
     (
       data: unknown,
       eventOptions: {
@@ -236,90 +408,352 @@ export function useStreamUI<
     [applyProcessedResult, userOnCustomEvent]
   );
 
-  const streamResult = useStream<TState, Bag>({
-    ...streamOptions,
-    onCustomEvent: handleCustomEvent,
-  } as UseStreamOptions<TState, Bag>);
+  const getMessages = useCallback(
+    (value: TState): Message[] => {
+      const messagesKey = options.messagesKey ?? "messages";
+      return Array.isArray(value[messagesKey]) ? value[messagesKey] : [];
+    },
+    [options.messagesKey]
+  );
 
-  const resetForStreamRef = useRef(() => {
-    registry.resetForStream();
-    processorRef.current.reset();
-  });
+  const setMessages = useCallback(
+    (current: TState, messages: Message[]): TState => {
+      const messagesKey = options.messagesKey ?? "messages";
+      return { ...current, [messagesKey]: messages };
+    },
+    [options.messagesKey]
+  );
 
-  useEffect(() => {
-    resetForStreamRef.current = () => {
-      registry.resetForStream();
-      processorRef.current.reset();
-    };
-  }, [registry]);
+  const history = registry.getHistory();
+  const branchContext = getBranchContext(branch, history.length > 0 ? history : undefined);
+
+  const historyValues = useMemo(
+    () =>
+      branchContext.threadHead?.values ??
+      options.initialValues ??
+      ({} as TState),
+    [branchContext.threadHead?.values, options.initialValues]
+  );
+
+  const stop = useCallback(async () => {
+    await stream.stop(historyValues, {});
+  }, [stream, historyValues]);
 
   const submit = useCallback(
     async (
       values: Partial<TState> | null | undefined,
       submitOptions?: UISubmitOptions<TState>
     ) => {
+      const checkpointId = submitOptions?.checkpoint?.checkpoint_id;
+      setBranch(
+        checkpointId != null
+          ? branchContext.branchByCheckpoint[checkpointId]?.branch ?? ""
+          : ""
+      );
+
       if (submitOptions?.optimisticMessage) {
         registry.addUserMessage(submitOptions.optimisticMessage);
       }
 
-      resetForStreamRef.current();
+      registry.resetForStream();
+      processorRef.current.reset();
 
-      const { optimisticMessage: _om, ...restOptions } = submitOptions ?? {};
-      return streamResult.submit(values, restOptions);
+      const initialStreamValues = (() => {
+        const prev = { ...historyValues, ...stream.values };
+
+        if (submitOptions?.optimisticValues != null) {
+          return {
+            ...prev,
+            ...(typeof submitOptions.optimisticValues === "function"
+              ? submitOptions.optimisticValues(prev)
+              : submitOptions.optimisticValues),
+          };
+        }
+
+        return { ...prev };
+      })();
+
+      stream.setStreamValues(() => initialStreamValues);
+      registry.setStreamValues(initialStreamValues);
+
+      let usableThreadId = threadId;
+
+      await stream.start(
+        async (signal: AbortSignal) => {
+          if (!usableThreadId) {
+            const thread = await client.threads.create({
+              threadId: submitOptions?.threadId,
+              metadata: submitOptions?.metadata,
+              signal,
+            });
+
+            usableThreadId = thread.thread_id;
+            threadIdRef.current = usableThreadId;
+            threadIdStreamingRef.current = usableThreadId;
+            onThreadIdChange(usableThreadId);
+          }
+
+          if (!usableThreadId) {
+            throw new Error("Failed to obtain valid thread ID.");
+          }
+
+          threadIdStreamingRef.current = usableThreadId;
+          registry.setIsLoading(true);
+
+          const streamMode = unique([
+            ...(submitOptions?.streamMode ?? []),
+            "messages-tuple" as const,
+            "values" as const,
+            "custom" as const,
+            "ui" as const,
+          ]);
+
+          let checkpoint =
+            submitOptions?.checkpoint ??
+            (historyLimit === true || typeof historyLimit === "number"
+              ? branchContext.threadHead?.checkpoint
+              : undefined) ??
+            undefined;
+
+          if (submitOptions?.checkpoint === null) checkpoint = undefined;
+          if (checkpoint != null) delete (checkpoint as Record<string, unknown>).thread_id;
+
+          return client.runs.stream(usableThreadId, options.assistantId, {
+            input: values as Record<string, unknown>,
+            config: submitOptions?.config,
+            context: submitOptions?.context,
+            command: submitOptions?.command,
+            interruptBefore: submitOptions?.interruptBefore,
+            interruptAfter: submitOptions?.interruptAfter,
+            metadata: submitOptions?.metadata,
+            multitaskStrategy: submitOptions?.multitaskStrategy,
+            onCompletion: submitOptions?.onCompletion,
+            onDisconnect: submitOptions?.onDisconnect ?? "cancel",
+            signal,
+            checkpoint,
+            streamMode,
+            streamSubgraphs: submitOptions?.streamSubgraphs,
+            streamResumable: submitOptions?.streamResumable,
+            durability: submitOptions?.durability,
+          }) as AsyncGenerator<EventStreamEvent<TState, Partial<TState>, unknown>>;
+        },
+        {
+          getMessages,
+          setMessages,
+          initialValues: historyValues,
+          callbacks: {
+            onCustomEvent: processCustomEvent,
+          },
+          async onSuccess() {
+            if (onFinish || historyLimit) {
+              const newHistory = await fetchHistoryData(usableThreadId!, historyLimit);
+              const lastHead = newHistory?.at(0);
+              if (lastHead && onFinish) {
+                onFinish(lastHead);
+              }
+              return null;
+            }
+            return undefined;
+          },
+          onError(streamError) {
+            registry.setError(streamError);
+            onError?.(streamError);
+          },
+          onFinish() {
+            threadIdStreamingRef.current = null;
+            registry.setIsLoading(false);
+          },
+        }
+      );
     },
-    [streamResult, registry]
+    [
+      client,
+      options.assistantId,
+      threadId,
+      onThreadIdChange,
+      historyValues,
+      historyLimit,
+      branchContext,
+      stream,
+      registry,
+      getMessages,
+      setMessages,
+      processCustomEvent,
+      onError,
+      onFinish,
+      fetchHistoryData,
+    ]
   );
+
+  useEffect(() => {
+    const unsubscribe = stream.subscribe(() => {
+      registry.setStreamValues(stream.values);
+      registry.setIsLoading(stream.isLoading);
+      if (stream.error) {
+        registry.setError(stream.error);
+      }
+    });
+    return unsubscribe;
+  }, [stream, registry]);
 
   const getSubgraphState = useCallback(
     (namespace: string[]) => registry.getSubgraphState(namespace),
     [registry]
   );
 
-  lastStateRef.current = registry.getState();
-  lastMessagesRef.current =
-    registry.getMessages() as MessageWithBlocks<TSchema>[];
-  lastToolsRef.current = registry.getTools();
+  const selectorRef = useRef(selector);
+  selectorRef.current = selector;
+  const lastSelectedRef = useRef<TSelected | null>(null);
+  const lastSnapshotRef = useRef<UISnapshot<TState, TSchema> | null>(null);
+  const lastSnapshotDataRef = useRef<{
+    values: TState;
+    error: unknown;
+    isLoading: boolean;
+    isHistoryLoading: boolean;
+    state: Partial<TState>;
+    uiMessages: MessageWithBlocks<TSchema>[];
+    tools: ToolState[];
+    branch: string;
+  } | null>(null);
 
-  const result = {
-    get values() {
-      return streamResult.values;
-    },
-    get error() {
-      return streamResult.error;
-    },
-    get isLoading() {
-      return streamResult.isLoading;
-    },
-    get isThreadLoading() {
-      return streamResult.isThreadLoading;
-    },
-    stop: streamResult.stop,
-    get branch() {
-      return streamResult.branch;
-    },
-    setBranch: streamResult.setBranch,
-    get history() {
-      return streamResult.history;
-    },
-    get experimental_branchTree() {
-      return streamResult.experimental_branchTree;
-    },
-    get interrupt() {
-      return streamResult.interrupt;
-    },
-    get messages() {
-      return streamResult.messages;
-    },
-    getMessagesMetadata: streamResult.getMessagesMetadata,
-    client: streamResult.client,
-    assistantId: streamResult.assistantId,
-    joinStream: streamResult.joinStream,
-    state: lastStateRef.current,
-    uiMessages: lastMessagesRef.current,
-    tools: lastToolsRef.current,
-    submit,
-    getSubgraphState,
-  };
+  const getSnapshot = useCallback(
+    (): UISnapshot<TState, TSchema> => {
+      const values = registry.getValues();
+      const error = registry.getError();
+      const isLoading = registry.getIsLoading();
+      const isHistoryLoading = registry.getIsHistoryLoading();
+      const state = registry.getState();
+      const uiMessages = registry.getMessages() as MessageWithBlocks<TSchema>[];
+      const tools = registry.getTools();
 
-  return result as UseStreamUIResult<TState, TSchema, Bag>;
+      const lastData = lastSnapshotDataRef.current;
+      if (
+        lastSnapshotRef.current &&
+        lastData &&
+        lastData.values === values &&
+        lastData.error === error &&
+        lastData.isLoading === isLoading &&
+        lastData.isHistoryLoading === isHistoryLoading &&
+        lastData.state === state &&
+        lastData.uiMessages === uiMessages &&
+        lastData.tools === tools &&
+        lastData.branch === branch
+      ) {
+        return lastSnapshotRef.current;
+      }
+
+      const snapshot: UISnapshot<TState, TSchema> = {
+        values,
+        error,
+        isLoading,
+        isThreadLoading: isHistoryLoading,
+        branch,
+        history: branchContext.flatHistory,
+        experimental_branchTree: branchContext.branchTree,
+        interrupt: (() => {
+          if (
+            values != null &&
+            "__interrupt__" in values &&
+            Array.isArray(values.__interrupt__)
+          ) {
+            const valueInterrupts = values.__interrupt__;
+            if (valueInterrupts.length === 0) return { when: "breakpoint" } as Interrupt;
+            if (valueInterrupts.length === 1) return valueInterrupts[0] as Interrupt;
+            return valueInterrupts as unknown as Interrupt;
+          }
+
+          if (isLoading) return undefined;
+
+          const interrupts = branchContext.threadHead?.tasks?.at(-1)?.interrupts;
+          if (interrupts == null || interrupts.length === 0) {
+            const next = branchContext.threadHead?.next ?? [];
+            if (!next.length || error != null) return undefined;
+            return { when: "breakpoint" } as Interrupt;
+          }
+
+          return interrupts.at(-1) as Interrupt | undefined;
+        })(),
+        messages: getMessages(values),
+        state,
+        uiMessages,
+        tools,
+        submit,
+        stop,
+        setBranch,
+        getSubgraphState,
+        client,
+        assistantId: options.assistantId,
+      };
+
+      lastSnapshotRef.current = snapshot;
+      lastSnapshotDataRef.current = {
+        values,
+        error,
+        isLoading,
+        isHistoryLoading,
+        state,
+        uiMessages,
+        tools,
+        branch,
+      };
+
+      return snapshot;
+    },
+    [registry, branch, branchContext, getMessages, submit, stop, getSubgraphState, client, options.assistantId]
+  );
+
+  const subscribe = useCallback(
+    (callback: () => void) => registry.subscribe(callback),
+    [registry]
+  );
+
+  const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+
+  if (selector) {
+    const selected = selector(snapshot);
+    if (!shallowEqual(lastSelectedRef.current, selected)) {
+      lastSelectedRef.current = selected;
+    }
+    return lastSelectedRef.current as TSelected;
+  }
+
+  return snapshot as UseStreamUIResult<TState, TSchema>;
+}
+
+export function useStreamUIState<
+  TState extends Record<string, unknown>,
+  TSchema = unknown,
+  K extends keyof TState = keyof TState,
+>(
+  options: UseStreamUIOptions<TState, TSchema>,
+  key: K
+): TState[K] | undefined {
+  return useStreamUI(options, (s) => s.state[key]) as TState[K] | undefined;
+}
+
+export function useStreamUIMessages<
+  TState extends Record<string, unknown>,
+  TSchema = unknown,
+>(
+  options: UseStreamUIOptions<TState, TSchema>
+): MessageWithBlocks<TSchema>[] {
+  return useStreamUI(options, (s) => s.uiMessages);
+}
+
+export function useStreamUITools<
+  TState extends Record<string, unknown>,
+  TSchema = unknown,
+>(options: UseStreamUIOptions<TState, TSchema>): ToolState[] {
+  return useStreamUI(options, (s) => s.tools);
+}
+
+export function useStreamUIActions<
+  TState extends Record<string, unknown>,
+  TSchema = unknown,
+>(options: UseStreamUIOptions<TState, TSchema>) {
+  return useStreamUI(options, (s) => ({
+    submit: s.submit,
+    stop: s.stop,
+    setBranch: s.setBranch,
+  }));
 }

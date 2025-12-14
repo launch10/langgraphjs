@@ -5,6 +5,7 @@ import type {
   MergeReducers,
   TextBlock,
 } from "./types.js";
+import type { ThreadState } from "../../schema.js";
 
 export interface RegistryOptions<TState extends Record<string, unknown>> {
   apiUrl: string;
@@ -17,17 +18,41 @@ const refCounts = new Map<string, number>();
 
 export class SharedChatRegistry<TState extends Record<string, unknown>> {
   private key: string;
-  private state: Partial<TState> = {};
+
+  private uiState: Partial<TState> = {};
+
   private preStreamState: Partial<TState> = {};
+
   private messages: MessageWithBlocks[] = [];
+
   private tools: ToolState[] = [];
+
   private subgraphState: Map<string, Partial<Record<string, unknown>>> =
     new Map();
+
   private mergeReducers: MergeReducers<TState>;
 
   private stateSubscribers: Set<() => void> = new Set();
+
   private messageSubscribers: Set<() => void> = new Set();
+
   private toolSubscribers: Set<() => void> = new Set();
+
+  private streamSubscribers: Set<() => void> = new Set();
+
+  private streamValues: TState | null = null;
+
+  private streamIsLoading = false;
+
+  private streamError: unknown = undefined;
+
+  private historyValues: TState | null = null;
+
+  private history: ThreadState<TState>[] = [];
+
+  private emptyValues: TState = {} as TState;
+
+  private isHistoryLoading = false;
 
   static getKey(apiUrl: string, threadId?: string): string {
     return `${apiUrl}::${threadId ?? "default"}`;
@@ -87,7 +112,7 @@ export class SharedChatRegistry<TState extends Record<string, unknown>> {
   }
 
   getState(): Partial<TState> {
-    return { ...this.state };
+    return this.uiState;
   }
 
   updateState<K extends keyof TState>(
@@ -104,9 +129,9 @@ export class SharedChatRegistry<TState extends Record<string, unknown>> {
     const baseValue = this.preStreamState[key];
 
     if (reducer) {
-      this.state[key] = reducer(value, baseValue);
+      this.uiState[key] = reducer(value, baseValue);
     } else {
-      this.state[key] = value;
+      this.uiState[key] = value;
     }
 
     this.notifyStateSubscribers();
@@ -130,7 +155,7 @@ export class SharedChatRegistry<TState extends Record<string, unknown>> {
   }
 
   getMessages(): MessageWithBlocks[] {
-    return [...this.messages];
+    return this.messages;
   }
 
   updateMessages(blocks: MessageBlock[]): void {
@@ -179,7 +204,7 @@ export class SharedChatRegistry<TState extends Record<string, unknown>> {
   }
 
   getTools(): ToolState[] {
-    return [...this.tools];
+    return this.tools;
   }
 
   updateTools(tools: ToolState[]): void {
@@ -191,6 +216,78 @@ export class SharedChatRegistry<TState extends Record<string, unknown>> {
     }
     this.tools = Array.from(toolMap.values());
     this.notifyToolSubscribers();
+  }
+
+  getStreamValues(): TState | null {
+    return this.streamValues;
+  }
+
+  setStreamValues(
+    values:
+      | TState
+      | null
+      | ((prev: TState | null) => TState | null)
+  ): void {
+    if (typeof values === "function") {
+      this.streamValues = values(this.streamValues);
+    } else {
+      this.streamValues = values;
+    }
+    this.notifyStreamSubscribers();
+  }
+
+  getIsLoading(): boolean {
+    return this.streamIsLoading;
+  }
+
+  setIsLoading(isLoading: boolean): void {
+    if (this.streamIsLoading === isLoading) return;
+    this.streamIsLoading = isLoading;
+    this.notifyStreamSubscribers();
+  }
+
+  getError(): unknown {
+    return this.streamError;
+  }
+
+  setError(error: unknown): void {
+    this.streamError = error;
+    this.notifyStreamSubscribers();
+  }
+
+  getHistoryValues(): TState | null {
+    return this.historyValues;
+  }
+
+  setHistoryValues(values: TState | null): void {
+    this.historyValues = values;
+    this.notifyStreamSubscribers();
+  }
+
+  getHistory(): ThreadState<TState>[] {
+    return this.history;
+  }
+
+  setHistory(history: ThreadState<TState>[]): void {
+    this.history = history;
+    if (history.length > 0) {
+      this.historyValues = history[0].values;
+    }
+    this.notifyStreamSubscribers();
+  }
+
+  getIsHistoryLoading(): boolean {
+    return this.isHistoryLoading;
+  }
+
+  setIsHistoryLoading(isLoading: boolean): void {
+    if (this.isHistoryLoading === isLoading) return;
+    this.isHistoryLoading = isLoading;
+    this.notifyStreamSubscribers();
+  }
+
+  getValues(): TState {
+    return this.streamValues ?? this.historyValues ?? this.emptyValues;
   }
 
   subscribeState(callback: () => void): () => void {
@@ -208,6 +305,24 @@ export class SharedChatRegistry<TState extends Record<string, unknown>> {
     return () => this.toolSubscribers.delete(callback);
   }
 
+  subscribeStream(callback: () => void): () => void {
+    this.streamSubscribers.add(callback);
+    return () => this.streamSubscribers.delete(callback);
+  }
+
+  subscribe(callback: () => void): () => void {
+    this.stateSubscribers.add(callback);
+    this.messageSubscribers.add(callback);
+    this.toolSubscribers.add(callback);
+    this.streamSubscribers.add(callback);
+    return () => {
+      this.stateSubscribers.delete(callback);
+      this.messageSubscribers.delete(callback);
+      this.toolSubscribers.delete(callback);
+      this.streamSubscribers.delete(callback);
+    };
+  }
+
   private notifyStateSubscribers(): void {
     this.stateSubscribers.forEach((cb) => cb());
   }
@@ -220,8 +335,12 @@ export class SharedChatRegistry<TState extends Record<string, unknown>> {
     this.toolSubscribers.forEach((cb) => cb());
   }
 
+  private notifyStreamSubscribers(): void {
+    this.streamSubscribers.forEach((cb) => cb());
+  }
+
   resetForStream(): void {
-    this.preStreamState = { ...this.state };
+    this.preStreamState = { ...this.uiState };
     this.tools = [];
     this.subgraphState.clear();
   }
@@ -231,10 +350,17 @@ export class SharedChatRegistry<TState extends Record<string, unknown>> {
     state: Partial<TState>
   ): void {
     this.messages = messages;
-    this.state = { ...state };
+    this.uiState = { ...state };
     this.preStreamState = { ...state };
     this.notifyMessageSubscribers();
     this.notifyStateSubscribers();
+  }
+
+  clear(): void {
+    this.streamValues = null;
+    this.streamError = undefined;
+    this.streamIsLoading = false;
+    this.notifyStreamSubscribers();
   }
 
   getKey(): string {

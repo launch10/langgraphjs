@@ -1,4 +1,5 @@
 import { BaseMessageChunk, isBaseMessage } from "@langchain/core/messages";
+import { TextBlockParser } from "./utils/text-block-parser.mjs";
 import { LangChainTracer } from "@langchain/core/tracers/tracer_langchain";
 import type {
   CheckpointMetadata,
@@ -167,7 +168,8 @@ export async function* streamState(
 
   const libStreamMode: Set<LangGraphStreamMode> = new Set(
     userStreamMode.filter(
-      (mode) => mode !== "events" && mode !== "messages-tuple"
+      (mode): mode is LangGraphStreamMode =>
+        mode !== "events" && mode !== "messages-tuple" && mode !== "ui"
     ) ?? []
   );
 
@@ -245,6 +247,33 @@ export async function* streamState(
 
   const messages: Record<string, BaseMessageChunk> = {};
   const completedIds = new Set<string>();
+  const parsers: Record<string, TextBlockParser> = {};
+  let uiSeq = 0;
+
+  const createUIEvent = (type: string, data: Record<string, unknown>) => ({
+    event: "custom",
+    data: {
+      type,
+      id: crypto.randomUUID(),
+      seq: ++uiSeq,
+      timestamp: Date.now(),
+      ...data,
+    },
+  });
+
+  const extractTextContent = (message: BaseMessageChunk): string | undefined => {
+    if (typeof message.content === "string") {
+      return message.content;
+    }
+    if (Array.isArray(message.content)) {
+      const textBlock = message.content.find(
+        (b): b is { type: "text"; text: string } => 
+          typeof b === "object" && b !== null && "type" in b && b.type === "text"
+      );
+      return textBlock?.text;
+    }
+    return undefined;
+  };
 
   for await (const event of events) {
     if (event.tags?.includes("langsmith:hidden")) continue;
@@ -355,6 +384,43 @@ export async function* streamState(
         }
 
         yield { event: "messages/partial", data: [messages[message.id]] };
+
+        if (userStreamMode.includes("ui")) {
+          const shouldEmitUI = !event.tags || event.tags.includes("notify") || !event.metadata?.tags;
+
+          if (shouldEmitUI && message.id) {
+            const textContent = extractTextContent(message);
+            if (textContent) {
+              if (!parsers[message.id]) {
+                parsers[message.id] = new TextBlockParser(0, "state");
+              }
+
+              parsers[message.id].append(textContent);
+              const streamingText = parsers[message.id].getStreamingText();
+              if (streamingText) {
+                yield createUIEvent("ui:content:text", {
+                  messageId: message.id,
+                  blockId: parsers[message.id].textId,
+                  index: 0,
+                  text: streamingText,
+                  final: false,
+                });
+              }
+
+              if (parsers[message.id].hasJsonStart()) {
+                const [hasParsed, parsed] = await parsers[message.id].tryParseStructured();
+                if (hasParsed && parsed) {
+                  for (const [key, value] of Object.entries(parsed)) {
+                    yield createUIEvent("ui:state:streaming", {
+                      key,
+                      value,
+                    });
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     }
   }

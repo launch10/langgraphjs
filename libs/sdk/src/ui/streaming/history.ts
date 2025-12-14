@@ -83,7 +83,7 @@ function createFromParsedBlocks<TSchema>(
         } as TextBlock;
 
       case "structured": {
-        const data = pb.data;
+        const {data} = pb;
         const isValid = options.validateSchema
           ? options.validateSchema(data)
           : true;

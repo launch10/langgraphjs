@@ -5,6 +5,7 @@ import {
   MergeStrategies,
   type MessageWithBlocks,
   type MessageBlock,
+  type UseStreamUIOptions,
 } from "@langchain/langgraph-sdk/react";
 
 interface Headline {
@@ -25,6 +26,15 @@ type AdsState = {
   descriptions: Description[];
 } & Record<string, unknown>;
 
+const streamOptions: UseStreamUIOptions<AdsState> = {
+  apiUrl: "http://localhost:8080/api",
+  assistantId: "ads",
+  merge: {
+    headlines: MergeStrategies.appendUnique<Headline, "id">("id"),
+    descriptions: MergeStrategies.replace<Description[]>(),
+  } as Record<string, (incoming: unknown, current: unknown) => unknown>,
+};
+
 function HeadlinesPanel({
   headlines,
   onToggleLock,
@@ -38,14 +48,7 @@ function HeadlinesPanel({
 
   return (
     <div style={{ marginBottom: 16 }}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          marginBottom: 8,
-        }}
-      >
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
         <span style={{ fontSize: 12, color: "#9ca3af" }}>
           Headlines ({visibleHeadlines.length}):
         </span>
@@ -58,10 +61,7 @@ function HeadlinesPanel({
       </p>
       <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
         {visibleHeadlines.map((h) => (
-          <div
-            key={h.id}
-            style={{ display: "flex", alignItems: "center", gap: 8 }}
-          >
+          <div key={h.id} style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <button
               onClick={() => onToggleLock(h.id)}
               style={{
@@ -75,12 +75,7 @@ function HeadlinesPanel({
             >
               {h.locked ? "🔒" : "🔓"}
             </button>
-            <span
-              style={{
-                color: h.locked ? "#4ade80" : "#22c55e",
-                fontWeight: h.locked ? 600 : 400,
-              }}
-            >
+            <span style={{ color: h.locked ? "#4ade80" : "#22c55e", fontWeight: h.locked ? 600 : 400 }}>
               {h.text}
             </span>
           </div>
@@ -104,14 +99,7 @@ function DescriptionsPanel({
 }) {
   return (
     <div>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          marginBottom: 8,
-        }}
-      >
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
         <span style={{ fontSize: 12, color: "#9ca3af" }}>
           Descriptions ({descriptions.length}):
         </span>
@@ -149,14 +137,7 @@ function BlockRenderer({ block }: { block: MessageBlock }) {
       if (!data || Object.keys(data).length === 0) return null;
 
       return (
-        <div
-          style={{
-            background: "#374151",
-            borderRadius: 4,
-            padding: 8,
-            marginTop: 8,
-          }}
-        >
+        <div style={{ background: "#374151", borderRadius: 4, padding: 8, marginTop: 8 }}>
           <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 4 }}>
             Generated Content:
           </div>
@@ -172,9 +153,7 @@ function BlockRenderer({ block }: { block: MessageBlock }) {
           )}
           {data.descriptions && (
             <div>
-              <div style={{ fontSize: 10, color: "#6b7280" }}>
-                Descriptions:
-              </div>
+              <div style={{ fontSize: 10, color: "#6b7280" }}>Descriptions:</div>
               {data.descriptions.map((d) => (
                 <div key={d.id} style={{ color: "#60a5fa", fontSize: 13 }}>
                   • {d.text}
@@ -188,45 +167,24 @@ function BlockRenderer({ block }: { block: MessageBlock }) {
 
     case "reasoning":
       return (
-        <div
-          style={{
-            background: "#1e3a5f",
-            borderRadius: 4,
-            padding: 8,
-            fontSize: 12,
-            fontStyle: "italic",
-            color: "#93c5fd",
-          }}
-        >
-          💭 {block.text}
+        <div style={{ background: "#1e3a5f", borderRadius: 4, padding: 8, fontSize: 12, fontStyle: "italic", color: "#93c5fd" }}>
+          {block.text}
         </div>
       );
 
     case "tool_call":
       return (
-        <div
-          style={{
-            background: "#374151",
-            borderRadius: 4,
-            padding: 8,
-            fontSize: 12,
-          }}
-        >
+        <div style={{ background: "#374151", borderRadius: 4, padding: 8, fontSize: 12 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span
               style={{
                 width: 8,
                 height: 8,
                 borderRadius: "50%",
-                background:
-                  block.state === "complete"
-                    ? "#22c55e"
-                    : block.state === "error"
-                    ? "#ef4444"
-                    : "#facc15",
+                background: block.state === "complete" ? "#22c55e" : block.state === "error" ? "#ef4444" : "#facc15",
               }}
             />
-            <span>🔧 {block.toolName}</span>
+            <span>{block.toolName}</span>
             <span style={{ color: "#6b7280" }}>({block.state})</span>
           </div>
           {block.output != null && (
@@ -242,24 +200,12 @@ function BlockRenderer({ block }: { block: MessageBlock }) {
   }
 }
 
-function Message({
-  message,
-  isLoading,
-}: {
-  message: MessageWithBlocks;
-  isLoading: boolean;
-}) {
+function Message({ message, isLoading }: { message: MessageWithBlocks; isLoading: boolean }) {
   const hasNoBlocks = message.blocks.length === 0;
   const showLoading = isLoading && hasNoBlocks && message.role === "assistant";
 
   return (
-    <div
-      style={{
-        display: "flex",
-        justifyContent: message.role === "user" ? "flex-end" : "flex-start",
-        marginBottom: 16,
-      }}
-    >
+    <div style={{ display: "flex", justifyContent: message.role === "user" ? "flex-end" : "flex-start", marginBottom: 16 }}>
       <div
         style={{
           maxWidth: "80%",
@@ -287,28 +233,75 @@ function Message({
   );
 }
 
+function HeadlinesWithSelector({ onToggleLock, isLoading }: { onToggleLock: (id: string) => void; isLoading: boolean }) {
+  console.log("[HeadlinesWithSelector] Rendering");
+  const headlines = useStreamUI<AdsState, unknown, Headline[]>(streamOptions, (s) => (s.state.headlines as Headline[]) ?? []);
+  const visibleHeadlines = headlines.filter((h: Headline) => !h.rejected);
+
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+        <span style={{ fontSize: 12, color: "#9ca3af" }}>
+          Headlines (selector) ({visibleHeadlines.length}):
+        </span>
+        {isLoading && <span style={{ fontSize: 11, color: "#facc15" }}>streaming...</span>}
+      </div>
+      <p style={{ fontSize: 11, color: "#6b7280", marginBottom: 8 }}>
+        This component only re-renders when headlines change
+      </p>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        {visibleHeadlines.map((h: Headline) => (
+          <div key={h.id} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button
+              onClick={() => onToggleLock(h.id)}
+              style={{ background: "none", border: "none", cursor: "pointer", fontSize: 16, opacity: h.locked ? 1 : 0.4 }}
+              title={h.locked ? "Unlock headline" : "Lock headline"}
+            >
+              {h.locked ? "🔒" : "🔓"}
+            </button>
+            <span style={{ color: h.locked ? "#4ade80" : "#22c55e", fontWeight: h.locked ? 600 : 400 }}>{h.text}</span>
+          </div>
+        ))}
+        {visibleHeadlines.length === 0 && (
+          <div style={{ fontSize: 12, color: "#6b7280", fontStyle: "italic" }}>No headlines yet</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DescriptionsWithSelector({ isLoading }: { isLoading: boolean }) {
+  console.log("[DescriptionsWithSelector] Rendering");
+  const descriptions = useStreamUI<AdsState, unknown, Description[]>(streamOptions, (s) => (s.state.descriptions as Description[]) ?? []);
+
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+        <span style={{ fontSize: 12, color: "#9ca3af" }}>
+          Descriptions (selector) ({descriptions.length}):
+        </span>
+        {isLoading && <span style={{ fontSize: 11, color: "#facc15" }}>streaming...</span>}
+      </div>
+      <p style={{ fontSize: 11, color: "#6b7280", marginBottom: 8 }}>
+        This component only re-renders when descriptions change
+      </p>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        {descriptions.map((d: Description) => (
+          <div key={d.id} style={{ color: "#60a5fa", fontSize: 14 }}>{d.text}</div>
+        ))}
+        {descriptions.length === 0 && (
+          <div style={{ fontSize: 12, color: "#6b7280", fontStyle: "italic" }}>No descriptions yet</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const [input, setInput] = useState("premium organic coffee beans");
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const { state, uiMessages, submit, isLoading, error } =
-    useStreamUI<AdsState>({
-      apiUrl: "http://localhost:8080/api",
-      assistantId: "ads",
-      merge: {
-        headlines: MergeStrategies.appendUnique<Headline, "id">("id"),
-        descriptions: MergeStrategies.replace<Description[]>(),
-      } as Record<string, (incoming: unknown, current: unknown) => unknown>,
-      onStateUpdate: (key, value) => {
-        console.log(`[useStreamUI] State update: ${String(key)}`, value);
-      },
-      onStructuredBlock: (block) => {
-        console.log("[useStreamUI] Structured block:", block);
-      },
-      onCustomEvent: (data) => {
-        console.log("[useStreamUI] Custom event:", data);
-      },
-    });
+  const { state, uiMessages, submit, isLoading, error } = useStreamUI<AdsState>(streamOptions);
 
   const headlines = (state.headlines as Headline[]) ?? [];
   const descriptions = (state.descriptions as Description[]) ?? [];
@@ -317,10 +310,7 @@ function App() {
     (e: React.FormEvent) => {
       e.preventDefault();
       if (!input.trim()) return;
-
-      submit({
-        messages: [{ role: "user", content: input }],
-      });
+      submit({ messages: [{ role: "user", content: input }] });
       setInput("");
     },
     [input, submit]
@@ -335,55 +325,36 @@ function App() {
   }, [uiMessages]);
 
   return (
-    <div
-      style={{
-        maxWidth: 700,
-        margin: "0 auto",
-        padding: 20,
-        fontFamily: "system-ui, sans-serif",
-      }}
-    >
-      <h1 style={{ marginBottom: 8 }}>LangGraph AI SDK Demo</h1>
+    <div style={{ maxWidth: 700, margin: "0 auto", padding: 20, fontFamily: "system-ui, sans-serif" }}>
+      <h1 style={{ marginBottom: 8 }}>LangGraph Streaming UI Demo</h1>
       <p style={{ color: "#9ca3af", marginBottom: 20, fontSize: 14 }}>
-        Streaming text + JSON blocks with useStreamUI and MessageWithBlocks
+        Streaming text + JSON blocks with useStreamUI
       </p>
 
       <div style={{ marginBottom: 10, fontSize: 12, color: "#9ca3af" }}>
         Status: {isLoading ? "streaming..." : "ready"}
-        {error ? (
-          <span style={{ color: "#ef4444" }}> Error: {String(error)}</span>
-        ) : null}
+        {error ? <span style={{ color: "#ef4444" }}> Error: {String(error)}</span> : null}
       </div>
 
-      <div
-        style={{
-          marginBottom: 16,
-          padding: 16,
-          background: "#1f2937",
-          borderRadius: 8,
-          border: "1px solid #374151",
-        }}
-      >
-        <div
-          style={{
-            fontSize: 14,
-            fontWeight: 600,
-            color: "#d1d5db",
-            marginBottom: 12,
-          }}
-        >
-          Streaming State Demo
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
+        <div style={{ padding: 16, background: "#1f2937", borderRadius: 8, border: "1px solid #374151" }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: "#d1d5db", marginBottom: 12 }}>
+            Traditional (re-renders on all state changes)
+          </div>
+          <HeadlinesPanel headlines={headlines} onToggleLock={handleToggleLock} isLoading={isLoading} />
+          <DescriptionsPanel descriptions={descriptions} isLoading={isLoading} />
         </div>
-        <p style={{ fontSize: 11, color: "#6b7280", marginBottom: 16 }}>
-          State updates stream in real-time as the LLM generates structured
-          output.
-        </p>
-        <HeadlinesPanel
-          headlines={headlines}
-          onToggleLock={handleToggleLock}
-          isLoading={isLoading}
-        />
-        <DescriptionsPanel descriptions={descriptions} isLoading={isLoading} />
+
+        <div style={{ padding: 16, background: "#1a2e1a", borderRadius: 8, border: "1px solid #2d5a2d" }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: "#86efac", marginBottom: 12 }}>
+            Selector Pattern (optimized re-renders)
+          </div>
+          <p style={{ fontSize: 11, color: "#6b7280", marginBottom: 16 }}>
+            Each component only re-renders when its specific data changes. Check console to see the difference.
+          </p>
+          <HeadlinesWithSelector onToggleLock={handleToggleLock} isLoading={isLoading} />
+          <DescriptionsWithSelector isLoading={isLoading} />
+        </div>
       </div>
 
       <div
@@ -398,9 +369,7 @@ function App() {
           background: "#111827",
         }}
       >
-        {uiMessages.length === 0 && (
-          <div style={{ color: "#6b7280" }}>No messages yet. Send one!</div>
-        )}
+        {uiMessages.length === 0 && <div style={{ color: "#6b7280" }}>No messages yet. Send one!</div>}
         {uiMessages.map((msg) => (
           <Message key={msg.id} message={msg} isLoading={isLoading} />
         ))}

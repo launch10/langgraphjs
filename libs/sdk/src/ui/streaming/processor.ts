@@ -34,11 +34,17 @@ export class UIEventProcessor<
   TState extends Record<string, unknown> = Record<string, unknown>,
 > {
   private options: UIEventProcessorOptions;
+
   private expectedSeq: number = 1;
+
   private buffer: Map<number, UIEvent> = new Map();
+
   private finalizedKeys: Set<keyof TState> = new Set();
+
   private blocks: Map<string, MessageBlock> = new Map();
+
   private tools: Map<string, ToolState> = new Map();
+
   private currentStreamId: string | undefined;
 
   constructor(options: UIEventProcessorOptions = {}) {

@@ -2,9 +2,14 @@ export { useStream } from "./stream.js";
 export { FetchStreamTransport } from "./stream.custom.js";
 export {
   useStreamUI,
+  useStreamUIState as useStreamUIStateSelector,
+  useStreamUIMessages as useStreamUIMessagesSelector,
+  useStreamUITools as useStreamUIToolsSelector,
+  useStreamUIActions,
   type UseStreamUIOptions,
   type UseStreamUIResult,
   type UISubmitOptions,
+  type UISnapshot,
 } from "./use-stream-ui.js";
 export {
   useStreamUIState,
@@ -18,6 +23,13 @@ export {
   useStreamUITools,
   type UseStreamUIToolsOptions,
 } from "./use-stream-ui-tools.js";
+export { useSmartSubscription } from "./use-smart-subscription.js";
+export {
+  detectAccess,
+  createEmptyAccessMap,
+  createTrackingProxy,
+  type AccessMap,
+} from "./access-detector.js";
 export {
   useSubgraphState,
   type UseSubgraphStateOptions,
