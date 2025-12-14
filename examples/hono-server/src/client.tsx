@@ -235,7 +235,7 @@ function Message({ message, isLoading }: { message: MessageWithBlocks; isLoading
 
 function HeadlinesWithSelector({ onToggleLock, isLoading }: { onToggleLock: (id: string) => void; isLoading: boolean }) {
   console.log("[HeadlinesWithSelector] Rendering");
-  const headlines = useStreamUI<AdsState, unknown, Headline[]>(streamOptions, (s) => (s.state.headlines as Headline[]) ?? []);
+  const headlines = useStreamUI<AdsState, unknown, Headline[]>(streamOptions, (s) => (s.values.headlines as Headline[]) ?? []);
   const visibleHeadlines = headlines.filter((h: Headline) => !h.rejected);
 
   return (
@@ -272,7 +272,7 @@ function HeadlinesWithSelector({ onToggleLock, isLoading }: { onToggleLock: (id:
 
 function DescriptionsWithSelector({ isLoading }: { isLoading: boolean }) {
   console.log("[DescriptionsWithSelector] Rendering");
-  const descriptions = useStreamUI<AdsState, unknown, Description[]>(streamOptions, (s) => (s.state.descriptions as Description[]) ?? []);
+  const descriptions = useStreamUI<AdsState, unknown, Description[]>(streamOptions, (s) => (s.values.descriptions as Description[]) ?? []);
 
   return (
     <div>
@@ -301,10 +301,11 @@ function App() {
   const [input, setInput] = useState("premium organic coffee beans");
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const { state, uiMessages, submit, isLoading, error } = useStreamUI<AdsState>(streamOptions);
+  const { values, uiMessages, submit, isLoading, error } = useStreamUI<AdsState>(streamOptions);
+  console.log(uiMessages)
 
-  const headlines = (state.headlines as Headline[]) ?? [];
-  const descriptions = (state.descriptions as Description[]) ?? [];
+  const headlines = (values.headlines as Headline[]) ?? [];
+  const descriptions = (values.descriptions as Description[]) ?? [];
 
   const handleSubmit = useCallback(
     (e: React.FormEvent) => {

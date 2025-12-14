@@ -337,7 +337,7 @@ export async function* streamState(
     // - handleLLMEnd receives the final message as BaseMessageChunk rather than BaseMessage, which from the outside will become indistinguishable.
     // - handleLLMEnd should not dedupe the message
     // - Don't think there's an utility that would convert a BaseMessageChunk to a BaseMessage?
-    if (userStreamMode.includes("messages")) {
+    if (userStreamMode.includes("messages") || userStreamMode.includes("messages-tuple")) {
       if (event.event === "on_chain_stream" && event.run_id === run.run_id) {
         const newMessages: Array<BaseMessageChunk> = [];
         const [_, chunk]: [string, any] = event.data.chunk;

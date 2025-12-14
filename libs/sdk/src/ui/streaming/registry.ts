@@ -12,6 +12,7 @@ import { MessageTupleManager } from "../messages.js";
 export interface RegistryOptions<TState extends Record<string, unknown>> {
   apiUrl: string;
   threadId?: string;
+  assistantId?: string;
   merge?: MergeReducers<TState>;
   throttle?: number | boolean;
 }
@@ -71,14 +72,16 @@ export class SharedChatRegistry<TState extends Record<string, unknown>> {
 
   private throttle: number | boolean = false;
 
-  static getKey(apiUrl: string, threadId?: string): string {
-    return `${apiUrl}::${threadId ?? "default"}`;
+  private static readonly NEW_CHAT_KEY = "__new__";
+
+  static getKey(apiUrl: string, assistantId?: string, threadId?: string): string {
+    return `${apiUrl}::${assistantId ?? "default"}::${threadId ?? SharedChatRegistry.NEW_CHAT_KEY}`;
   }
 
   static getOrCreate<TState extends Record<string, unknown>>(
     options: RegistryOptions<TState>
   ): SharedChatRegistry<TState> {
-    const key = SharedChatRegistry.getKey(options.apiUrl, options.threadId);
+    const key = SharedChatRegistry.getKey(options.apiUrl, options.assistantId, options.threadId);
 
     if (!registries.has(key)) {
       const registry = new SharedChatRegistry<TState>(
