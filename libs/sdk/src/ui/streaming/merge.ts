@@ -150,4 +150,4 @@ export const MergeStrategies = {
   },
 };
 
-export type { MergeReducer, MergeReducers } from "./types.js";
+export type { MergeReducer, MergeReducers, TransformReducer, TransformReducers } from "./types.js";

@@ -8,6 +8,12 @@ import {
   type UISnapshot,
 } from "@langchain/langgraph-sdk/react";
 
+interface RawHeadline {
+  id: string;
+  text: string;
+  status?: string;
+}
+
 interface Headline {
   id: string;
   text: string;
@@ -15,10 +21,27 @@ interface Headline {
   rejected: boolean;
 }
 
+interface RawDescription {
+  id: string;
+  text: string;
+}
+
 interface Description {
   id: string;
   text: string;
 }
+
+const toHeadline = (raw: RawHeadline): Headline => ({
+  id: raw.id,
+  text: raw.text,
+  locked: false,
+  rejected: raw.status === "rejected",
+});
+
+const toDescription = (raw: RawDescription): Description => ({
+  id: raw.id,
+  text: raw.text,
+});
 
 type AdsState = {
   messages: { role: string; content: string }[];
@@ -46,6 +69,10 @@ function getAdsOptions() {
     getInitialThreadId: getThreadIdFromUrl,
     onThreadId: handleThreadIdChange,
     fetchStateHistory: true,
+    transform: {
+      headlines: (raw: RawHeadline[]) => raw.map(toHeadline),
+      descriptions: (raw: RawDescription[]) => raw.map(toDescription),
+    } as Record<string, (raw: unknown) => unknown>,
     merge: {
       headlines: MergeStrategies.appendUnique<Headline, "id">("id"),
       descriptions: MergeStrategies.replace<Description[]>(),

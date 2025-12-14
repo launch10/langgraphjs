@@ -541,15 +541,27 @@ describe("SharedChatRegistry", () => {
   });
 
   describe("getKey", () => {
-    it("generates correct key", () => {
-      expect(SharedChatRegistry.getKey("http://api.com", "t1")).toBe(
-        "http://api.com::t1"
+    it("generates correct key with all params", () => {
+      expect(SharedChatRegistry.getKey("http://api.com", "assistant1", "thread1")).toBe(
+        "http://api.com::assistant1::thread1"
       );
     });
 
-    it("uses default for undefined threadId", () => {
-      expect(SharedChatRegistry.getKey("http://api.com", undefined)).toBe(
-        "http://api.com::default"
+    it("uses default for undefined assistantId", () => {
+      expect(SharedChatRegistry.getKey("http://api.com", undefined, "thread1")).toBe(
+        "http://api.com::default::thread1"
+      );
+    });
+
+    it("uses __new__ for undefined threadId", () => {
+      expect(SharedChatRegistry.getKey("http://api.com", "assistant1", undefined)).toBe(
+        "http://api.com::assistant1::__new__"
+      );
+    });
+
+    it("uses defaults for both undefined", () => {
+      expect(SharedChatRegistry.getKey("http://api.com", undefined, undefined)).toBe(
+        "http://api.com::default::__new__"
       );
     });
   });

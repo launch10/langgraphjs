@@ -100,7 +100,7 @@ export class TextBlockParser<
       }
       return this.messageBuffer;
     }
-    return this.messageBuffer.substring(0, jsonStart);
+    return this.messageBuffer.substring(0, jsonStart).trimEnd();
   }
 
   getPostscript(): string | undefined {

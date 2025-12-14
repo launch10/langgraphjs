@@ -17,7 +17,7 @@ describe("useStreamUI dependencies", () => {
       });
 
       expect(registry).toBeDefined();
-      expect(registry.getKey()).toBe("http://localhost:2024::thread-1");
+      expect(registry.getKey()).toBe("http://localhost:2024::default::thread-1");
     });
 
     it("shares registry across components with same key", () => {

@@ -149,6 +149,12 @@ export type MergeReducers<TState> = {
   [K in keyof TState]?: MergeReducer<TState[K]>;
 };
 
+export type TransformReducer<TRaw, TTransformed> = (raw: TRaw) => TTransformed;
+
+export type TransformReducers<TState> = {
+  [K in keyof TState]?: TransformReducer<unknown, TState[K]>;
+};
+
 export interface ParsedBlock {
   type: "text" | "structured" | "reasoning";
   id: string;

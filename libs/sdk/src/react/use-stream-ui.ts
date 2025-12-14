@@ -20,6 +20,7 @@ import type {
   StructuredBlock,
   ToolState,
   MergeReducers,
+  TransformReducers,
 } from "../ui/streaming/types.js";
 import { isUIEvent } from "../ui/streaming/types.js";
 import {
@@ -52,6 +53,7 @@ export interface UseStreamUIOptions<
   throttle?: number | boolean;
   schema?: TSchema;
   jsonTarget?: "messages" | "state";
+  transform?: TransformReducers<TState>;
   merge?: MergeReducers<TState>;
   onStateUpdate?: <K extends keyof TState>(key: K, value: TState[K]) => void;
   onStructuredBlock?: (block: StructuredBlock<TSchema>) => void;
@@ -204,6 +206,7 @@ export function useStreamUI<
   selector?: (snapshot: UISnapshot<TState, TSchema>) => TSelected
 ): UseStreamUIResult<TState, TSchema> | TSelected {
   const {
+    transform,
     merge,
     onStateUpdate,
     onStructuredBlock,
@@ -253,6 +256,7 @@ export function useStreamUI<
       apiUrl: options.apiUrl ?? "",
       assistantId: options.assistantId,
       threadId: initialThreadId,
+      transform,
       merge,
       throttle: options.throttle ?? false,
     });

@@ -3,6 +3,7 @@ import type {
   MessageBlock,
   ToolState,
   MergeReducers,
+  TransformReducers,
   TextBlock,
 } from "./types.js";
 import type { ThreadState } from "../../schema.js";
@@ -13,6 +14,7 @@ export interface RegistryOptions<TState extends Record<string, unknown>> {
   apiUrl: string;
   threadId?: string;
   assistantId?: string;
+  transform?: TransformReducers<TState>;
   merge?: MergeReducers<TState>;
   throttle?: number | boolean;
 }
@@ -33,6 +35,8 @@ export class SharedChatRegistry<TState extends Record<string, unknown>> {
 
   private subgraphState: Map<string, Partial<Record<string, unknown>>> =
     new Map();
+
+  private transformReducers: TransformReducers<TState>;
 
   private mergeReducers: MergeReducers<TState>;
 
@@ -86,6 +90,7 @@ export class SharedChatRegistry<TState extends Record<string, unknown>> {
     if (!registries.has(key)) {
       const registry = new SharedChatRegistry<TState>(
         key,
+        options.transform ?? ({} as TransformReducers<TState>),
         options.merge ?? ({} as MergeReducers<TState>),
         options.throttle ?? false
       );
@@ -127,14 +132,20 @@ export class SharedChatRegistry<TState extends Record<string, unknown>> {
     refCounts.clear();
   }
 
-  private constructor(key: string, mergeReducers: MergeReducers<TState>, throttle: number | boolean) {
+  private constructor(
+    key: string,
+    transformReducers: TransformReducers<TState>,
+    mergeReducers: MergeReducers<TState>,
+    throttle: number | boolean
+  ) {
     this.key = key;
+    this.transformReducers = transformReducers;
     this.mergeReducers = mergeReducers;
     this.throttle = throttle;
   }
 
   getState(): Partial<TState> {
-    return this.uiState;
+    return { ...this.uiState };
   }
 
   updateState<K extends keyof TState>(
@@ -147,13 +158,16 @@ export class SharedChatRegistry<TState extends Record<string, unknown>> {
       return;
     }
 
+    const transform = this.transformReducers[key];
+    const transformed = transform ? (transform(value) as TState[K]) : value;
+
     const reducer = this.mergeReducers[key];
     const baseValue = this.preStreamState[key];
 
     if (reducer) {
-      this.uiState[key] = reducer(value, baseValue);
+      this.uiState[key] = reducer(transformed, baseValue);
     } else {
-      this.uiState[key] = value;
+      this.uiState[key] = transformed;
     }
 
     this.notifyStateSubscribers();
@@ -178,7 +192,7 @@ export class SharedChatRegistry<TState extends Record<string, unknown>> {
   }
 
   getMessages(): MessageWithBlocks[] {
-    return this.messages;
+    return [...this.messages];
   }
 
   updateMessages(blocks: MessageBlock[]): void {
@@ -227,7 +241,7 @@ export class SharedChatRegistry<TState extends Record<string, unknown>> {
   }
 
   getTools(): ToolState[] {
-    return this.tools;
+    return [...this.tools];
   }
 
   updateTools(tools: ToolState[]): void {

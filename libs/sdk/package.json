@@ -18,7 +18,10 @@
     "lint:eslint": "NODE_OPTIONS=--max-old-space-size=4096 eslint --cache --ext .ts,.js,.jsx,.tsx src/",
     "lint": "yarn lint:eslint",
     "lint:fix": "yarn lint:eslint --fix",
-    "test": "vitest run"
+    "test": "vitest run --exclude '**/e2e.test.tsx' --exclude '**/e2e/**'",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "test:e2e:deps": "docker compose -f src/react/__tests__/e2e/docker-compose.yml up -d",
+    "test:e2e:deps:down": "docker compose -f src/react/__tests__/e2e/docker-compose.yml down"
   },
   "license": "MIT",
   "dependencies": {
@@ -29,6 +32,7 @@
   "devDependencies": {
     "@langchain/core": "^1.1.2",
     "@langchain/scripts": "^0.1.4",
+    "@testing-library/react": "^16.0.0",
     "@tsconfig/recommended": "^1.0.2",
     "@types/node": "^18.15.11",
     "@types/react": "^19.0.8",
@@ -43,6 +47,7 @@
     "eslint-plugin-no-instanceof": "^1.0.1",
     "eslint-plugin-prettier": "^4.2.1",
     "eslint-plugin-react-hooks": "^5.2.0",
+    "jsdom": "^24.0.0",
     "prettier": "^2.8.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
