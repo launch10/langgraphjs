@@ -6,6 +6,9 @@
     "dev": "turbo dev:client dev:server",
     "dev:client": "vite",
     "dev:server": "tsx watch src/server.mts",
+    "dev:server:debug": "node --inspect --import tsx src/server.mts",
+    "dev:libs": "turbo watch build:internal --filter=@langchain/langgraph-sdk --filter=@langchain/langgraph-api --filter=@langchain/langgraph",
+    "dev:full": "concurrently \"yarn dev:libs\" \"yarn dev:server\" \"yarn dev:client\"",
     "build:internal": "tsc -b && vite build",
     "format": "prettier --write src",
     "lint": "prettier --check src"
@@ -29,6 +32,7 @@
     "@types/react-dom": "^19.0.3",
     "@types/uuid": "^10.0.0",
     "@vitejs/plugin-react": "^4.4.1",
+    "concurrently": "^8.2.2",
     "prettier": "^2.8.3",
     "tsx": "^4.19.3",
     "typescript": "^5.4.5",

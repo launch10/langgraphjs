@@ -6,6 +6,7 @@ import {
   type MessageWithBlocks,
   type MessageBlock,
   type UseStreamUIOptions,
+  type UISnapshot,
 } from "@langchain/langgraph-sdk/react";
 
 interface Headline {
@@ -26,23 +27,99 @@ type AdsState = {
   descriptions: Description[];
 } & Record<string, unknown>;
 
-function getThreadIdFromUrl(): string | null {
+type AdsSnapshot = UISnapshot<AdsState>;
+
+function getThreadIdFromUrl(): string | undefined {
   const path = window.location.pathname;
-  if (path === "/" || path === "") return null;
+  if (path === "/" || path === "") return undefined;
   const id = path.slice(1);
-  return id || null;
+  return id || undefined;
 }
 
-function HeadlinesPanel({
-  headlines,
-  onToggleLock,
-  isLoading,
-}: {
-  headlines: Headline[];
-  onToggleLock: (id: string) => void;
-  isLoading: boolean;
-}) {
+const initialThreadIdRef = { current: undefined as string | undefined };
+function getInitialThreadId(): string | undefined {
+  if (initialThreadIdRef.current === undefined) {
+    initialThreadIdRef.current = getThreadIdFromUrl();
+  }
+  return initialThreadIdRef.current;
+}
+
+function handleThreadIdChange(threadId: string): void {
+  window.history.pushState({}, "", `/${threadId}`);
+}
+
+function getAdsOptions(): UseStreamUIOptions<AdsState> {
+  return {
+    apiUrl: "http://localhost:8080/api",
+    assistantId: "ads",
+    threadId: getInitialThreadId(),
+    onThreadId: handleThreadIdChange,
+    fetchStateHistory: true,
+    merge: {
+      headlines: MergeStrategies.appendUnique<Headline, "id">("id"),
+      descriptions: MergeStrategies.replace<Description[]>(),
+    } as Record<string, (incoming: unknown, current: unknown) => unknown>,
+  };
+}
+
+const adsOptions = getAdsOptions();
+
+function useAdsChat<TSelected = AdsSnapshot>(
+  selector?: (snapshot: AdsSnapshot) => TSelected
+): TSelected {
+  return useStreamUI<AdsState, unknown, TSelected>(
+    adsOptions,
+    selector as (snapshot: UISnapshot<AdsState, unknown>) => TSelected
+  );
+}
+
+function useAdsChatHeadlines() {
+  return useAdsChat((s) => s.state.headlines as Headline[] | undefined);
+}
+
+function useAdsChatDescriptions() {
+  return useAdsChat((s) => s.state.descriptions as Description[] | undefined);
+}
+
+function useAdsChatMessages() {
+  return useAdsChat((s) => s.uiMessages);
+}
+
+function useAdsChatIsLoading() {
+  return useAdsChat((s) => s.isLoading);
+}
+
+function useAdsChatActions() {
+  return useAdsChat((s) => ({
+    submit: s.submit,
+    stop: s.stop,
+    setState: s.setState,
+  }));
+}
+
+function useAdsChatStatus() {
+  return useAdsChat((s) => ({
+    isLoading: s.isLoading,
+    error: s.error,
+    threadId: s.threadId,
+  }));
+}
+
+function HeadlinesPanel() {
+  const headlines = useAdsChatHeadlines() ?? [];
+  const isLoading = useAdsChatIsLoading();
+  const { setState } = useAdsChatActions();
+
   const visibleHeadlines = headlines.filter((h) => !h.rejected);
+
+  const handleToggleLock = useCallback((id: string) => {
+    const updated = headlines.map((h) =>
+      h.id === id ? { ...h, locked: !h.locked } : h
+    );
+    setState({ headlines: updated });
+  }, [headlines, setState]);
+
+  console.log("[HeadlinesPanel] render", { count: visibleHeadlines.length });
 
   return (
     <div style={{ marginBottom: 16 }}>
@@ -61,7 +138,7 @@ function HeadlinesPanel({
         {visibleHeadlines.map((h) => (
           <div key={h.id} style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <button
-              onClick={() => onToggleLock(h.id)}
+              onClick={() => handleToggleLock(h.id)}
               style={{
                 background: "none",
                 border: "none",
@@ -88,13 +165,12 @@ function HeadlinesPanel({
   );
 }
 
-function DescriptionsPanel({
-  descriptions,
-  isLoading,
-}: {
-  descriptions: Description[];
-  isLoading: boolean;
-}) {
+function DescriptionsPanel() {
+  const descriptions = useAdsChatDescriptions() ?? [];
+  const isLoading = useAdsChatIsLoading();
+
+  console.log("[DescriptionsPanel] render", { count: descriptions.length });
+
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
@@ -114,6 +190,36 @@ function DescriptionsPanel({
         {descriptions.length === 0 && (
           <div style={{ fontSize: 12, color: "#6b7280", fontStyle: "italic" }}>
             No descriptions yet
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function LockedHeadlinesPanel() {
+  const headlines = useAdsChatHeadlines() ?? [];
+  const lockedHeadlines = headlines.filter((h) => h.locked);
+
+  console.log("[LockedHeadlinesPanel] render", { count: lockedHeadlines.length });
+
+  return (
+    <div style={{ padding: 16, background: "#1a2e1a", borderRadius: 8, border: "1px solid #2d5a2d" }}>
+      <div style={{ fontSize: 14, fontWeight: 600, color: "#86efac", marginBottom: 12 }}>
+        Locked Headlines ({lockedHeadlines.length})
+      </div>
+      <p style={{ fontSize: 11, color: "#6b7280", marginBottom: 16 }}>
+        These will be preserved on next generation
+      </p>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        {lockedHeadlines.map((h) => (
+          <div key={h.id} style={{ color: "#4ade80", fontSize: 14, fontWeight: 600 }}>
+            {h.text}
+          </div>
+        ))}
+        {lockedHeadlines.length === 0 && (
+          <div style={{ fontSize: 12, color: "#6b7280", fontStyle: "italic" }}>
+            No locked headlines
           </div>
         )}
       </div>
@@ -231,33 +337,45 @@ function Message({ message, isLoading }: { message: MessageWithBlocks; isLoading
   );
 }
 
-function App() {
-  const [input, setInput] = useState("premium organic coffee beans");
+function MessagesPanel() {
+  const uiMessages = useAdsChatMessages();
+  const isLoading = useAdsChatIsLoading();
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const [controlledThreadId, setControlledThreadId] = useState<string | null>(getThreadIdFromUrl);
 
-  const handleThreadId = useCallback((newThreadId: string) => {
-    setControlledThreadId(newThreadId);
-    window.history.pushState({}, "", `/${newThreadId}`);
-  }, []);
+  console.log("[MessagesPanel] render", { count: uiMessages.length });
 
-  const streamOptions: UseStreamUIOptions<AdsState> = {
-    apiUrl: "http://localhost:8080/api",
-    assistantId: "ads",
-    threadId: controlledThreadId,
-    onThreadId: handleThreadId,
-    fetchStateHistory: true,
-    merge: {
-      headlines: MergeStrategies.appendUnique<Headline, "id">("id"),
-      descriptions: MergeStrategies.replace<Description[]>(),
-    } as Record<string, (incoming: unknown, current: unknown) => unknown>,
-  };
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [uiMessages]);
 
-  const { values, uiMessages, submit, isLoading, error, setState, threadId } = useStreamUI<AdsState>(streamOptions);
+  return (
+    <div
+      style={{
+        border: "1px solid #374151",
+        borderRadius: 8,
+        padding: 16,
+        minHeight: 300,
+        maxHeight: 400,
+        overflowY: "auto",
+        marginBottom: 16,
+        background: "#111827",
+      }}
+    >
+      {uiMessages.length === 0 && <div style={{ color: "#6b7280" }}>No messages yet. Send one!</div>}
+      {uiMessages.map((msg) => (
+        <Message key={msg.id} message={msg} isLoading={isLoading} />
+      ))}
+      <div ref={messagesEndRef} />
+    </div>
+  );
+}
 
-  const headlines = (values.headlines as Headline[]) ?? [];
-  const descriptions = (values.descriptions as Description[]) ?? [];
-  const lockedHeadlines = headlines.filter((h) => h.locked);
+function ChatInput() {
+  const [input, setInput] = useState("premium organic coffee beans");
+  const { submit } = useAdsChatActions();
+  const isLoading = useAdsChatIsLoading();
+
+  console.log("[ChatInput] render");
 
   const handleSubmit = useCallback(
     (e: React.FormEvent) => {
@@ -273,121 +391,87 @@ function App() {
     [input, submit]
   );
 
-  const handleToggleLock = useCallback((id: string) => {
-    const updated = headlines.map((h) =>
-      h.id === id ? { ...h, locked: !h.locked } : h
-    );
-    setState({ headlines: updated });
-  }, [headlines, setState]);
+  return (
+    <form onSubmit={handleSubmit} style={{ display: "flex", gap: 8 }}>
+      <input
+        type="text"
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
+        placeholder="Describe your business..."
+        disabled={isLoading}
+        style={{
+          flex: 1,
+          padding: 12,
+          borderRadius: 8,
+          border: "1px solid #374151",
+          background: "#1f2937",
+          color: "white",
+        }}
+      />
+      <button
+        type="submit"
+        disabled={isLoading || !input.trim()}
+        style={{
+          padding: "12px 24px",
+          borderRadius: 8,
+          border: "none",
+          background: isLoading ? "#4b5563" : "#2563eb",
+          color: "white",
+          cursor: isLoading ? "not-allowed" : "pointer",
+          fontWeight: 600,
+        }}
+      >
+        {isLoading ? "..." : "Send"}
+      </button>
+    </form>
+  );
+}
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [uiMessages]);
+function StatusBar() {
+  const { isLoading, error, threadId } = useAdsChatStatus();
 
-  useEffect(() => {
-    const handlePopState = () => {
-      const newThreadId = getThreadIdFromUrl();
-      setControlledThreadId(newThreadId);
-    };
-    window.addEventListener("popstate", handlePopState);
-    return () => window.removeEventListener("popstate", handlePopState);
-  }, []);
+  console.log("[StatusBar] render");
+
+  return (
+    <div style={{ marginBottom: 10, fontSize: 12, color: "#9ca3af" }}>
+      Status: {isLoading ? "streaming..." : "ready"}
+      {threadId && <span> | Thread: {threadId.slice(0, 8)}...</span>}
+      {error ? <span style={{ color: "#ef4444" }}> Error: {String(error)}</span> : null}
+    </div>
+  );
+}
+
+function AdsChat() {
+  console.log("[AdsChat] render");
 
   return (
     <div style={{ maxWidth: 700, margin: "0 auto", padding: 20, fontFamily: "system-ui, sans-serif" }}>
       <h1 style={{ marginBottom: 8 }}>LangGraph Streaming UI Demo</h1>
       <p style={{ color: "#9ca3af", marginBottom: 20, fontSize: 14 }}>
-        Streaming text + JSON blocks with useStreamUI
+        Streaming text + JSON blocks with useStreamUI (granular subscriptions)
       </p>
 
-      <div style={{ marginBottom: 10, fontSize: 12, color: "#9ca3af" }}>
-        Status: {isLoading ? "streaming..." : "ready"}
-        {threadId && <span> | Thread: {threadId.slice(0, 8)}...</span>}
-        {error ? <span style={{ color: "#ef4444" }}> Error: {String(error)}</span> : null}
-      </div>
+      <StatusBar />
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
         <div style={{ padding: 16, background: "#1f2937", borderRadius: 8, border: "1px solid #374151" }}>
           <div style={{ fontSize: 14, fontWeight: 600, color: "#d1d5db", marginBottom: 12 }}>
             Headlines &amp; Descriptions
           </div>
-          <HeadlinesPanel headlines={headlines} onToggleLock={handleToggleLock} isLoading={isLoading} />
-          <DescriptionsPanel descriptions={descriptions} isLoading={isLoading} />
+          <HeadlinesPanel />
+          <DescriptionsPanel />
         </div>
 
-        <div style={{ padding: 16, background: "#1a2e1a", borderRadius: 8, border: "1px solid #2d5a2d" }}>
-          <div style={{ fontSize: 14, fontWeight: 600, color: "#86efac", marginBottom: 12 }}>
-            Locked Headlines ({lockedHeadlines.length})
-          </div>
-          <p style={{ fontSize: 11, color: "#6b7280", marginBottom: 16 }}>
-            These will be preserved on next generation
-          </p>
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            {lockedHeadlines.map((h) => (
-              <div key={h.id} style={{ color: "#4ade80", fontSize: 14, fontWeight: 600 }}>
-                {h.text}
-              </div>
-            ))}
-            {lockedHeadlines.length === 0 && (
-              <div style={{ fontSize: 12, color: "#6b7280", fontStyle: "italic" }}>
-                No locked headlines
-              </div>
-            )}
-          </div>
-        </div>
+        <LockedHeadlinesPanel />
       </div>
 
-      <div
-        style={{
-          border: "1px solid #374151",
-          borderRadius: 8,
-          padding: 16,
-          minHeight: 300,
-          maxHeight: 400,
-          overflowY: "auto",
-          marginBottom: 16,
-          background: "#111827",
-        }}
-      >
-        {uiMessages.length === 0 && <div style={{ color: "#6b7280" }}>No messages yet. Send one!</div>}
-        {uiMessages.map((msg) => (
-          <Message key={msg.id} message={msg} isLoading={isLoading} />
-        ))}
-        <div ref={messagesEndRef} />
-      </div>
+      <MessagesPanel />
+      <ChatInput />
 
-      <form onSubmit={handleSubmit} style={{ display: "flex", gap: 8 }}>
-        <input
-          type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="Describe your business..."
-          disabled={isLoading}
-          style={{
-            flex: 1,
-            padding: 12,
-            borderRadius: 8,
-            border: "1px solid #374151",
-            background: "#1f2937",
-            color: "white",
-          }}
-        />
-        <button
-          type="submit"
-          disabled={isLoading || !input.trim()}
-          style={{
-            padding: "12px 24px",
-            borderRadius: 8,
-            border: "none",
-            background: isLoading ? "#4b5563" : "#2563eb",
-            color: "white",
-            cursor: isLoading ? "not-allowed" : "pointer",
-            fontWeight: 600,
-          }}
-        >
-          {isLoading ? "..." : "Send"}
-        </button>
-      </form>
+      <div style={{ marginTop: 16, padding: 12, background: "#1f2937", borderRadius: 8, fontSize: 11, color: "#6b7280" }}>
+        <strong>Granular Subscriptions Demo:</strong> Open DevTools console to see which components re-render.
+        Each panel only re-renders when its specific data changes!
+      </div>
 
       <style>{`
         @keyframes bounce {
@@ -397,6 +481,11 @@ function App() {
       `}</style>
     </div>
   );
+}
+
+function App() {
+  console.log("[App] render");
+  return <AdsChat />;
 }
 
 createRoot(document.getElementById("root")!).render(
