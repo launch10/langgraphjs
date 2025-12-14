@@ -135,7 +135,10 @@ export function putTests<T extends BaseCheckpointSaver>(
           );
         });
 
-        it("should store the metadata without alteration", () => {
+        it_skipForSomeModules(initializer.checkpointerName, {
+          "@langchain/langgraph-checkpoint-postgres":
+            "Postgres merges configurable into metadata for API compatibility",
+        })("should store the metadata without alteration", () => {
           expect(basicPutRoundTripTuple?.metadata).toEqual(
             metadataStoredWithoutIdInConfig
           );
