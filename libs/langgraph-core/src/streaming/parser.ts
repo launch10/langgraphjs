@@ -23,6 +23,227 @@ interface JsonParseResult {
   state: "partial" | "complete" | "error";
 }
 
+function strictParsePartialJson(s: string): unknown {
+  const buffer = s.trim();
+  if (buffer.length === 0) throw new Error("Unexpected end of JSON input");
+  let pos = 0;
+
+  function skipWhitespace(): void {
+    while (pos < buffer.length && /\s/.test(buffer[pos])) pos += 1;
+  }
+
+  function parseString(): string {
+    if (buffer[pos] !== '"')
+      throw new Error(`Expected '"' at position ${pos}`);
+    pos += 1;
+    let result = "";
+    let escaped = false;
+    while (pos < buffer.length) {
+      const char = buffer[pos];
+      if (escaped) {
+        if (char === "n") result += "\n";
+        else if (char === "t") result += "\t";
+        else if (char === "r") result += "\r";
+        else if (char === "\\") result += "\\";
+        else if (char === '"') result += '"';
+        else if (char === "b") result += "\b";
+        else if (char === "f") result += "\f";
+        else if (char === "/") result += "/";
+        else if (char === "u") {
+          const hex = buffer.substring(pos + 1, pos + 5);
+          if (/^[0-9A-Fa-f]{0,4}$/.test(hex)) {
+            if (hex.length === 4)
+              result += String.fromCharCode(Number.parseInt(hex, 16));
+            else result += `u${hex}`;
+            pos += hex.length;
+          } else
+            throw new Error(
+              `Invalid unicode escape sequence '\\u${hex}' at position ${pos}`
+            );
+        } else
+          throw new Error(
+            `Invalid escape sequence '\\${char}' at position ${pos}`
+          );
+        escaped = false;
+      } else if (char === "\\") escaped = true;
+      else if (char === '"') {
+        pos += 1;
+        return result;
+      } else result += char;
+      pos += 1;
+    }
+    if (escaped) result += "\\";
+    return result;
+  }
+
+  function parseNumber(): number {
+    const start = pos;
+    let numStr = "";
+    if (buffer[pos] === "-") {
+      numStr += "-";
+      pos += 1;
+    }
+    if (pos < buffer.length && buffer[pos] === "0") {
+      numStr += "0";
+      pos += 1;
+      if (buffer[pos] >= "0" && buffer[pos] <= "9")
+        throw new Error(`Invalid number at position ${start}`);
+    }
+    if (pos < buffer.length && buffer[pos] >= "1" && buffer[pos] <= "9")
+      while (
+        pos < buffer.length &&
+        buffer[pos] >= "0" &&
+        buffer[pos] <= "9"
+      ) {
+        numStr += buffer[pos];
+        pos += 1;
+      }
+    if (pos < buffer.length && buffer[pos] === ".") {
+      numStr += ".";
+      pos += 1;
+      while (
+        pos < buffer.length &&
+        buffer[pos] >= "0" &&
+        buffer[pos] <= "9"
+      ) {
+        numStr += buffer[pos];
+        pos += 1;
+      }
+    }
+    if (
+      pos < buffer.length &&
+      (buffer[pos] === "e" || buffer[pos] === "E")
+    ) {
+      numStr += buffer[pos];
+      pos += 1;
+      if (
+        pos < buffer.length &&
+        (buffer[pos] === "+" || buffer[pos] === "-")
+      ) {
+        numStr += buffer[pos];
+        pos += 1;
+      }
+      while (
+        pos < buffer.length &&
+        buffer[pos] >= "0" &&
+        buffer[pos] <= "9"
+      ) {
+        numStr += buffer[pos];
+        pos += 1;
+      }
+    }
+    if (numStr === "-") return -0;
+    const num = Number.parseFloat(numStr);
+    if (Number.isNaN(num)) {
+      pos = start;
+      throw new Error(`Invalid number '${numStr}' at position ${start}`);
+    }
+    return num;
+  }
+
+  function parseValue(): unknown {
+    skipWhitespace();
+    if (pos >= buffer.length)
+      throw new Error(`Unexpected end of input at position ${pos}`);
+    const char = buffer[pos];
+    if (char === "{") return parseObject();
+    if (char === "[") return parseArray();
+    if (char === '"') return parseString();
+    if ("null".startsWith(buffer.substring(pos, pos + 4))) {
+      pos += Math.min(4, buffer.length - pos);
+      return null;
+    }
+    if ("true".startsWith(buffer.substring(pos, pos + 4))) {
+      pos += Math.min(4, buffer.length - pos);
+      return true;
+    }
+    if ("false".startsWith(buffer.substring(pos, pos + 5))) {
+      pos += Math.min(5, buffer.length - pos);
+      return false;
+    }
+    if (char === "-" || (char >= "0" && char <= "9")) return parseNumber();
+    throw new Error(`Unexpected character '${char}' at position ${pos}`);
+  }
+
+  function parseArray(): unknown[] {
+    if (buffer[pos] !== "[")
+      throw new Error(`Expected '[' at position ${pos}`);
+    const arr: unknown[] = [];
+    pos += 1;
+    skipWhitespace();
+    if (pos >= buffer.length) return arr;
+    if (buffer[pos] === "]") {
+      pos += 1;
+      return arr;
+    }
+    while (pos < buffer.length) {
+      skipWhitespace();
+      if (pos >= buffer.length) return arr;
+      arr.push(parseValue());
+      skipWhitespace();
+      if (pos >= buffer.length) return arr;
+      if (buffer[pos] === "]") {
+        pos += 1;
+        return arr;
+      } else if (buffer[pos] === ",") {
+        pos += 1;
+        continue;
+      }
+      throw new Error(`Expected ',' or ']' at position ${pos}`);
+    }
+    return arr;
+  }
+
+  function parseObject(): Record<string, unknown> {
+    if (buffer[pos] !== "{")
+      throw new Error(`Expected '{' at position ${pos}`);
+    const obj: Record<string, unknown> = {};
+    pos += 1;
+    skipWhitespace();
+    if (pos >= buffer.length) return obj;
+    if (buffer[pos] === "}") {
+      pos += 1;
+      return obj;
+    }
+    while (pos < buffer.length) {
+      skipWhitespace();
+      if (pos >= buffer.length) return obj;
+      const key = parseString();
+      skipWhitespace();
+      if (pos >= buffer.length) return obj;
+      if (buffer[pos] !== ":")
+        throw new Error(`Expected ':' at position ${pos}`);
+      pos += 1;
+      skipWhitespace();
+      if (pos >= buffer.length) return obj;
+      obj[key] = parseValue();
+      skipWhitespace();
+      if (pos >= buffer.length) return obj;
+      if (buffer[pos] === "}") {
+        pos += 1;
+        return obj;
+      } else if (buffer[pos] === ",") {
+        pos += 1;
+        continue;
+      }
+      throw new Error(`Expected ',' or '}' at position ${pos}`);
+    }
+    return obj;
+  }
+
+  const value = parseValue();
+  return value;
+}
+
+function parsePartialJsonCore(s: string): unknown | null {
+  try {
+    if (typeof s === "undefined") return null;
+    return strictParsePartialJson(s);
+  } catch {
+    return null;
+  }
+}
+
 function parsePartialJson(text: string): JsonParseResult {
   const trimmed = text.trim();
   if (!trimmed) {
@@ -33,83 +254,15 @@ function parsePartialJson(text: string): JsonParseResult {
     const value = JSON.parse(trimmed);
     return { value, state: "complete" };
   } catch {
-    // ignore
+    // ignore - try partial parsing
   }
 
-  try {
-    const repaired = repairJson(trimmed);
-    const value = JSON.parse(repaired);
-    return { value, state: "partial" };
-  } catch {
-    return { value: undefined, state: "error" };
-  }
-}
-
-function repairJson(text: string): string {
-  let result = text;
-  let openBraces = 0;
-  let openBrackets = 0;
-  let inString = false;
-  let escapeNext = false;
-
-  for (let i = 0; i < result.length; i++) {
-    const char = result[i];
-
-    if (escapeNext) {
-      escapeNext = false;
-      continue;
-    }
-
-    if (char === "\\") {
-      escapeNext = true;
-      continue;
-    }
-
-    if (char === '"') {
-      inString = !inString;
-      continue;
-    }
-
-    if (inString) continue;
-
-    if (char === "{") openBraces++;
-    if (char === "}") openBraces--;
-    if (char === "[") openBrackets++;
-    if (char === "]") openBrackets--;
+  const partialValue = parsePartialJsonCore(trimmed);
+  if (partialValue !== null) {
+    return { value: partialValue, state: "partial" };
   }
 
-  if (inString) {
-    result += '"';
-  }
-
-  const lastNonWhitespace = result.trim().slice(-1);
-  if (
-    lastNonWhitespace !== "}" &&
-    lastNonWhitespace !== "]" &&
-    lastNonWhitespace !== '"' &&
-    lastNonWhitespace !== "," &&
-    openBraces > 0
-  ) {
-    if (result.includes(":")) {
-      const colonIndex = result.lastIndexOf(":");
-      const afterColon = result.slice(colonIndex + 1).trim();
-      if (!afterColon || afterColon === "") {
-        result += "null";
-      }
-    }
-  }
-
-  while (openBrackets > 0) {
-    result += "]";
-    openBrackets--;
-  }
-
-  while (openBraces > 0) {
-    result += "}";
-    openBraces--;
-  }
-
-  return result;
+  return { value: undefined, state: "error" };
 }
 
 export class RobustTextBlockParser {

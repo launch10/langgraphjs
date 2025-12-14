@@ -6,7 +6,7 @@ import {
   LangGraphRunnableConfig,
 } from "@langchain/langgraph";
 import { streamStructuredOutput } from "@langchain/langgraph/streaming";
-import { FakeListChatModel } from "@langchain/core/utils/testing";
+import { ChatAnthropic } from "@langchain/anthropic";
 import { z } from "zod";
 
 export interface Headline {
@@ -60,56 +60,47 @@ const AdsSchema = z.object({
   ),
 });
 
-function buildLLMResponse(userInput: string): string {
-  const jsonContent = JSON.stringify(
-    {
-      headlines: [
-        { id: "h1", text: `Premium ${userInput} Services`, status: "pending" },
-        { id: "h2", text: `Best ${userInput} in Town`, status: "pending" },
-        {
-          id: "h3",
-          text: `${userInput} - Quality Guaranteed`,
-          status: "pending",
-        },
-      ],
-      descriptions: [
-        {
-          id: "d1",
-          text: `Experience the finest ${userInput}. Visit us today and see the difference quality makes.`,
-        },
-        {
-          id: "d2",
-          text: `Looking for reliable ${userInput}? We've got you covered with expert service.`,
-        },
-      ],
-    },
-    null,
-    2
-  );
+const SYSTEM_PROMPT = `You are an expert Google Ads copywriter. When given a business description, generate compelling ad copy.
 
-  return (
-    `Great! I'll create some Google Ads headlines and descriptions for your business: "${userInput}". Here are my suggestions:\n\n` +
-    "```json\n" +
-    jsonContent +
-    "\n```" +
-    `\n\nFeel free to lock any headlines you want to keep, then ask for more variations!`
-  );
+Always respond with some friendly text explaining what you're creating, then include a JSON block with this exact structure:
+
+\`\`\`json
+{
+  "headlines": [
+    {"id": "h1", "text": "Headline 1 text", "status": "pending"},
+    {"id": "h2", "text": "Headline 2 text", "status": "pending"},
+    {"id": "h3", "text": "Headline 3 text", "status": "pending"}
+  ],
+  "descriptions": [
+    {"id": "d1", "text": "Description 1 text"},
+    {"id": "d2", "text": "Description 2 text"}
+  ]
 }
+\`\`\`
+
+Headlines should be max 30 characters. Descriptions should be max 90 characters.
+Generate unique IDs for each item (h1, h2, etc for headlines, d1, d2 for descriptions).`;
 
 const adsAgentNode = async (
   state: AdsState,
   config: LangGraphRunnableConfig
 ): Promise<Partial<AdsState>> => {
-  const lastMessage = state.messages[state.messages.length - 1];
-  const userInput = lastMessage?.content || "coffee shop";
+  console.log("[adsAgent] config.writer exists:", !!config.writer);
+  console.log("[adsAgent] state.messages:", state.messages);
 
-  const model = new FakeListChatModel({
-    responses: [buildLLMResponse(userInput)],
+  const model = new ChatAnthropic({
+    model: "claude-sonnet-4-20250514",
+    temperature: 0.7,
   });
+
+  const messagesWithSystem = [
+    { role: "system", content: SYSTEM_PROMPT },
+    ...state.messages,
+  ];
 
   const { message, parsed } = await streamStructuredOutput(
     model,
-    state.messages,
+    messagesWithSystem,
     {
       schema: AdsSchema,
       target: "state",

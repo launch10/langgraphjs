@@ -300,10 +300,13 @@ function App() {
         descriptions: MergeStrategies.replace<Description[]>(),
       } as Record<string, (incoming: unknown, current: unknown) => unknown>,
       onStateUpdate: (key, value) => {
-        console.log(`State update: ${String(key)}`, value);
+        console.log(`[useStreamUI] State update: ${String(key)}`, value);
       },
       onStructuredBlock: (block) => {
-        console.log("Structured block:", block);
+        console.log("[useStreamUI] Structured block:", block);
+      },
+      onCustomEvent: (data) => {
+        console.log("[useStreamUI] Custom event:", data);
       },
     });
 

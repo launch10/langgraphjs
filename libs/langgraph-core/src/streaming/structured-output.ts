@@ -133,10 +133,30 @@ export class StreamingStructuredOutput<
   }
 
   private emitStreamingUpdates(): void {
+    this.emitTextStreamingUpdates();
+
     if (this.options.target === "state") {
       this.emitStateStreamingUpdates();
     } else {
-      this.emitMessageStreamingUpdates();
+      this.emitStructuredStreamingUpdates();
+    }
+  }
+
+  private emitTextStreamingUpdates(): void {
+    const text = this.parser.getStreamingText();
+    if (text && this.shouldEmit("text", text)) {
+      this.emit({
+        type: "ui:content:text",
+        id: uuidv4(),
+        seq: this.nextSeq(),
+        timestamp: Date.now(),
+        namespace: this.getNamespace(),
+        messageId: this.messageId,
+        blockId: this.parser.textId,
+        index: this.textBlockIndex,
+        text,
+        final: false,
+      });
     }
   }
 
@@ -156,7 +176,7 @@ export class StreamingStructuredOutput<
         }
       }
 
-      if (this.shouldEmit(key, transformedValue)) {
+      if (this.shouldEmit(`state:${key}`, transformedValue)) {
         this.emit({
           type: "ui:state:streaming",
           id: uuidv4(),
@@ -170,23 +190,7 @@ export class StreamingStructuredOutput<
     }
   }
 
-  private emitMessageStreamingUpdates(): void {
-    const text = this.parser.getStreamingText();
-    if (text && this.shouldEmit("text", text)) {
-      this.emit({
-        type: "ui:content:text",
-        id: uuidv4(),
-        seq: this.nextSeq(),
-        timestamp: Date.now(),
-        namespace: this.getNamespace(),
-        messageId: this.messageId,
-        blockId: this.parser.textId,
-        index: this.textBlockIndex,
-        text,
-        final: false,
-      });
-    }
-
+  private emitStructuredStreamingUpdates(): void {
     if (this.parser.isInJsonBlock()) {
       const partial = this.parser.tryParsePartialJson();
       if (partial && this.shouldEmit("structured", partial)) {
@@ -208,10 +212,30 @@ export class StreamingStructuredOutput<
   }
 
   private emitFinalUpdates(): void {
+    this.emitTextFinalUpdate();
+
     if (this.options.target === "state") {
       this.emitStateFinalUpdates();
     } else {
-      this.emitMessageFinalUpdates();
+      this.emitStructuredFinalUpdates();
+    }
+  }
+
+  private emitTextFinalUpdate(): void {
+    const text = this.parser.getStreamingText();
+    if (text) {
+      this.emit({
+        type: "ui:content:text",
+        id: uuidv4(),
+        seq: this.nextSeq(),
+        timestamp: Date.now(),
+        namespace: this.getNamespace(),
+        messageId: this.messageId,
+        blockId: this.parser.textId,
+        index: this.textBlockIndex,
+        text,
+        final: true,
+      });
     }
   }
 
@@ -250,23 +274,7 @@ export class StreamingStructuredOutput<
     }
   }
 
-  private emitMessageFinalUpdates(): void {
-    const text = this.parser.getStreamingText();
-    if (text) {
-      this.emit({
-        type: "ui:content:text",
-        id: uuidv4(),
-        seq: this.nextSeq(),
-        timestamp: Date.now(),
-        namespace: this.getNamespace(),
-        messageId: this.messageId,
-        blockId: this.parser.textId,
-        index: this.textBlockIndex,
-        text,
-        final: true,
-      });
-    }
-
+  private emitStructuredFinalUpdates(): void {
     const blocks = this.parser.getBlocks();
     for (const block of blocks) {
       if (block.type === "structured" && block.data) {
