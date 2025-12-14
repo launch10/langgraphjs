@@ -106,7 +106,7 @@ async function parseStringContent<TSchema>(
   let idx = 0;
 
   if (preamble) blocks.push(createParsedBlock("text", idx++, { sourceText: preamble }));
-  if (target === "messages") blocks.push(createParsedBlock("structured", idx++, { sourceText: content, parsed }));
+  blocks.push(createParsedBlock("structured", idx++, { sourceText: content, data: parsed }));
   if (postscript) blocks.push(createParsedBlock("text", idx++, { sourceText: postscript }));
 
   const extractedState = target === "state" ? parsed : undefined;
@@ -152,9 +152,8 @@ async function parseArrayContent<TSchema>(
     const { preamble } = extractJson(block.text);
     if (preamble) parsedBlocks.push(createParsedBlock("text", idx, { sourceText: preamble }));
 
-    if (target === "messages") {
-      parsedBlocks.push(createParsedBlock("structured", idx + 1, { sourceText: block.text, parsed }));
-    } else {
+    parsedBlocks.push(createParsedBlock("structured", idx + 1, { sourceText: block.text, data: parsed }));
+    if (target === "state") {
       extractedState = parsed;
     }
 

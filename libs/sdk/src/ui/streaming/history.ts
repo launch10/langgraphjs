@@ -98,7 +98,7 @@ function createFromParsedBlocks<TSchema>(
           type: "text",
           id: pb.id,
           index: pb.index ?? idx,
-          text: pb.text ?? "",
+          text: pb.text ?? pb.sourceText ?? "",
         } as TextBlock;
 
       case "structured": {

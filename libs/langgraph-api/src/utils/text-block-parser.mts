@@ -7,7 +7,7 @@ export interface ParsedBlock {
   index: number;
   id: string;
   sourceText?: string;
-  parsed?: Record<string, unknown>;
+  data?: Record<string, unknown>;
   toolCallId?: string;
   toolName?: string;
   toolArgs?: string;
