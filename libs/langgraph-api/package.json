@@ -79,6 +79,10 @@
       "types": "./dist/queue.d.mts",
       "default": "./dist/queue.mjs"
     },
+    "./app": {
+      "types": "./dist/app.d.mts",
+      "default": "./dist/app.mjs"
+    },
     "./package.json": "./package.json"
   },
   "repository": {

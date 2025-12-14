@@ -32,7 +32,10 @@ interface AgentState {
   messages: Array<BaseMessage>;
 }
 
-const storageTypes = (process.env.STORAGE_TYPES?.split(",") ?? ["postgres", "memory"]) as Array<"postgres" | "memory">;
+const storageTypes = (process.env.STORAGE_TYPES?.split(",") ?? [
+  "postgres",
+  "memory",
+]) as Array<"postgres" | "memory">;
 
 describe.each(storageTypes)("API tests (%s storage)", (storageType) => {
   const port = storageType === "postgres" ? 2024 : 2025;
@@ -51,13 +54,21 @@ describe.each(storageTypes)("API tests (%s storage)", (storageType) => {
         ["./tests/utils.server.mts", "--dev", "-c", "./graphs/langgraph.json"],
         {
           stdio: "overlapped",
-          env: { ...process.env, PORT: String(port), STORAGE_TYPE: storageType },
+          env: {
+            ...process.env,
+            PORT: String(port),
+            STORAGE_TYPE: storageType,
+          },
           shell: true,
         }
       );
 
-      server.stdout?.on("data", (data) => console.log(data.toString().trimEnd()));
-      server.stderr?.on("data", (data) => console.log(data.toString().trimEnd()));
+      server.stdout?.on("data", (data) =>
+        console.log(data.toString().trimEnd())
+      );
+      server.stderr?.on("data", (data) =>
+        console.log(data.toString().trimEnd())
+      );
 
       await waitPort({ port, timeout: 30_000 });
     }
@@ -99,9 +110,9 @@ describe.each(storageTypes)("API tests (%s storage)", (storageType) => {
       });
 
       await client.assistants.delete(res.assistant_id);
-      await expect(() => client.assistants.get(res.assistant_id)).rejects.toThrow(
-        "HTTP 404: Assistant not found"
-      );
+      await expect(() =>
+        client.assistants.get(res.assistant_id)
+      ).rejects.toThrow("HTTP 404: Assistant not found");
     });
 
     it("schemas", { timeout: 30_000 }, async () => {
@@ -170,9 +181,9 @@ describe.each(storageTypes)("API tests (%s storage)", (storageType) => {
       });
 
       await client.assistants.delete(res.assistant_id);
-      await expect(() => client.assistants.get(res.assistant_id)).rejects.toThrow(
-        "HTTP 404: Assistant not found"
-      );
+      await expect(() =>
+        client.assistants.get(res.assistant_id)
+      ).rejects.toThrow("HTTP 404: Assistant not found");
     });
 
     it("list assistants", async () => {
@@ -291,7 +302,10 @@ describe.each(storageTypes)("API tests (%s storage)", (storageType) => {
       const updated = await client.assistants.update(created.assistant_id, {});
       expect(updated.version).toBe(2);
 
-      const changed = await client.assistants.setLatest(created.assistant_id, 1);
+      const changed = await client.assistants.setLatest(
+        created.assistant_id,
+        1
+      );
       expect(changed.version).toBe(1);
 
       const updatedAgain = await client.assistants.update(
@@ -426,56 +440,62 @@ describe.each(storageTypes)("API tests (%s storage)", (storageType) => {
       expect(search[1].thread_id).toBe(createThreadResponse.thread_id);
     });
 
-    it.concurrent("update state while run in flight", { retry: 0 }, async () => {
-      const thread = await client.threads.create();
-      const run = await client.runs.create(thread.thread_id, "agent_simple", {
-        input: { messages: [{ role: "human", content: "foo" }] },
-        afterSeconds: 2,
-      });
+    it.concurrent(
+      "update state while run in flight",
+      { retry: 0 },
+      async () => {
+        const thread = await client.threads.create();
+        const run = await client.runs.create(thread.thread_id, "agent_simple", {
+          input: { messages: [{ role: "human", content: "foo" }] },
+          afterSeconds: 2,
+        });
 
-      // make sure that the run has been created
-      await new Promise((resolve) => setTimeout(resolve, 500));
+        // make sure that the run has been created
+        await new Promise((resolve) => setTimeout(resolve, 500));
 
-      // Attempt to update state while run is in flight - should fail
-      await expect(() =>
-        client.threads.updateState(thread.thread_id, {
+        // Attempt to update state while run is in flight - should fail
+        await expect(() =>
+          client.threads.updateState(thread.thread_id, {
+            values: {
+              messages: [
+                { type: "ai", content: "One must imagine Sisyphus happy." },
+              ],
+            },
+            asNode: "agent",
+          })
+        ).rejects.toThrow("HTTP 409");
+
+        // Cancel the run
+        await client.runs.cancel(thread.thread_id, run.run_id);
+
+        // Verify Sisyphus is not in state
+        const state = await client.threads.getState(thread.thread_id);
+        expect(JSON.stringify(state)).not.toContain("Sisyphus");
+
+        // Join the run and verify it was interrupted
+        await client.runs.join(thread.thread_id, run.run_id);
+        const runState = await client.runs.get(thread.thread_id, run.run_id);
+        expect(runState.status).toBe("interrupted");
+
+        // Verify thread is idle
+        const threadState = await client.threads.get(thread.thread_id);
+        expect(threadState.status).toBe("idle");
+
+        // Now update state should work
+        await client.threads.updateState(thread.thread_id, {
           values: {
             messages: [
               { type: "ai", content: "One must imagine Sisyphus happy." },
             ],
           },
           asNode: "agent",
-        })
-      ).rejects.toThrow("HTTP 409");
+        });
 
-      // Cancel the run
-      await client.runs.cancel(thread.thread_id, run.run_id);
-
-      // Verify Sisyphus is not in state
-      const state = await client.threads.getState(thread.thread_id);
-      expect(JSON.stringify(state)).not.toContain("Sisyphus");
-
-      // Join the run and verify it was interrupted
-      await client.runs.join(thread.thread_id, run.run_id);
-      const runState = await client.runs.get(thread.thread_id, run.run_id);
-      expect(runState.status).toBe("interrupted");
-
-      // Verify thread is idle
-      const threadState = await client.threads.get(thread.thread_id);
-      expect(threadState.status).toBe("idle");
-
-      // Now update state should work
-      await client.threads.updateState(thread.thread_id, {
-        values: {
-          messages: [{ type: "ai", content: "One must imagine Sisyphus happy." }],
-        },
-        asNode: "agent",
-      });
-
-      // Verify Sisyphus is now in state
-      const finalState = await client.threads.getState(thread.thread_id);
-      expect(JSON.stringify(finalState)).toContain("Sisyphus");
-    });
+        // Verify Sisyphus is now in state
+        const finalState = await client.threads.getState(thread.thread_id);
+        expect(JSON.stringify(finalState)).toContain("Sisyphus");
+      }
+    );
   });
 
   describe("threads copy", () => {
@@ -553,7 +573,9 @@ describe.each(storageTypes)("API tests (%s storage)", (storageType) => {
         input,
         config: globalConfig,
       });
-      const originalThreadState = await client.threads.getState(thread.thread_id);
+      const originalThreadState = await client.threads.getState(
+        thread.thread_id
+      );
 
       const copiedThread = await client.threads.copy(thread.thread_id);
       const newInput = { messages: [{ type: "human", content: "bar" }] };
@@ -701,7 +723,9 @@ describe.each(storageTypes)("API tests (%s storage)", (storageType) => {
 
       await client.runs.cancel(thread.thread_id, pendingRun.run_id);
 
-      runs = await client.runs.list(thread.thread_id, { status: "interrupted" });
+      runs = await client.runs.list(thread.thread_id, {
+        status: "interrupted",
+      });
       expect(runs.length).toBe(1);
     });
 
@@ -933,7 +957,8 @@ describe.each(storageTypes)("API tests (%s storage)", (storageType) => {
       );
 
       const chunks = await gatherIterator(stream);
-      const runId = findLast(chunks, (i) => i.event === "metadata")?.data.run_id;
+      const runId = findLast(chunks, (i) => i.event === "metadata")?.data
+        .run_id;
       expect(runId).not.toBeUndefined();
       expect(runId).not.toBeNull();
 
@@ -982,7 +1007,8 @@ describe.each(storageTypes)("API tests (%s storage)", (storageType) => {
       expect(messages.length).toBe(4);
       expect(messages.at(-1)?.content).toBe("end");
 
-      const runId = findLast(chunks, (i) => i.event === "metadata")?.data.run_id;
+      const runId = findLast(chunks, (i) => i.event === "metadata")?.data
+        .run_id;
       expect(runId).not.toBeNull();
 
       const seenEventTypes = new Set(chunks.map((i) => i.event));
@@ -1335,7 +1361,9 @@ describe.each(storageTypes)("API tests (%s storage)", (storageType) => {
 
       expect(
         new Date(searchResAfterUpdate.items[0].updatedAt).getTime()
-      ).toBeGreaterThan(new Date(searchResAfterPut.items[0].updatedAt).getTime());
+      ).toBeGreaterThan(
+        new Date(searchResAfterPut.items[0].updatedAt).getTime()
+      );
 
       const listResAfterPut = await client.store.listNamespaces();
       expect(listResAfterPut.namespaces).toBeDefined();
@@ -1358,7 +1386,9 @@ describe.each(storageTypes)("API tests (%s storage)", (storageType) => {
       const assistant = await client.assistants.create({ graphId: "nested" });
 
       expect(
-        Object.keys(await client.assistants.getSubgraphs(assistant.assistant_id))
+        Object.keys(
+          await client.assistants.getSubgraphs(assistant.assistant_id)
+        )
       ).toEqual(["gp_two"]);
 
       const subgraphs = await client.assistants.getSubgraphs(
@@ -1771,8 +1801,8 @@ describe.each(storageTypes)("API tests (%s storage)", (storageType) => {
       expect(chunks.filter((i) => i.event === "error")).toEqual([]);
       expect(chunks.at(-1)?.event).toBe("values");
 
-      const continueMessages = findLast(chunks, (i) => i.event === "values")?.data
-        .messages;
+      const continueMessages = findLast(chunks, (i) => i.event === "values")
+        ?.data.messages;
 
       expect(continueMessages.length).toBe(2);
       expect(continueMessages[0].content).toBe("SF");
@@ -1978,7 +2008,10 @@ describe.each(storageTypes)("API tests (%s storage)", (storageType) => {
       expect(stream.filter((chunk) => chunk.event === "error")).toEqual([]);
 
       let state = await client.threads.getState<StateSchema>(thread.thread_id);
-      expect(state.values).toMatchObject({ keyOne: "value3", keyTwo: "value4" });
+      expect(state.values).toMatchObject({
+        keyOne: "value3",
+        keyTwo: "value4",
+      });
     });
 
     // TODO: upgrade to latest LangGraph after
@@ -2012,8 +2045,13 @@ describe.each(storageTypes)("API tests (%s storage)", (storageType) => {
       );
       expect(stream.filter((chunk) => chunk.event === "error")).toEqual([]);
 
-      const state = await client.threads.getState<StateSchema>(thread.thread_id);
-      expect(state.values).toMatchObject({ keyOne: "value1", keyTwo: "value2" });
+      const state = await client.threads.getState<StateSchema>(
+        thread.thread_id
+      );
+      expect(state.values).toMatchObject({
+        keyOne: "value1",
+        keyTwo: "value2",
+      });
     });
   });
 
@@ -2036,13 +2074,18 @@ describe.each(storageTypes)("API tests (%s storage)", (storageType) => {
 
     const stream = [];
     for await (const chunk of runStream) {
-      if (chunk.event === "debug" && (chunk.data as any).type === "checkpoint") {
+      if (
+        chunk.event === "debug" &&
+        (chunk.data as any).type === "checkpoint"
+      ) {
         stream.push((chunk.data as any).payload);
       }
     }
 
     const history = (
-      await client.threads.getHistory(thread.thread_id, { limit: stream.length })
+      await client.threads.getHistory(thread.thread_id, {
+        limit: stream.length,
+      })
     ).reverse();
 
     expect(
@@ -2082,7 +2125,9 @@ describe.each(storageTypes)("API tests (%s storage)", (storageType) => {
       )
       .map((i) => (i.data as any)?.payload);
 
-    const history = (await client.threads.getHistory(thread.thread_id)).reverse();
+    const history = (
+      await client.threads.getHistory(thread.thread_id)
+    ).reverse();
     const checkpoint = history[history.length - 1].checkpoint;
 
     // Continue the run from the checkpoint
@@ -2098,7 +2143,9 @@ describe.each(storageTypes)("API tests (%s storage)", (storageType) => {
     ).reverse();
 
     const continueStream = stream
-      .filter((i) => i.event === "debug" && (i.data as any).type === "checkpoint")
+      .filter(
+        (i) => i.event === "debug" && (i.data as any).type === "checkpoint"
+      )
       .map((i) => (i.data as any).payload);
 
     expect(
@@ -2314,7 +2361,9 @@ describe.each(storageTypes)("API tests (%s storage)", (storageType) => {
         config: globalConfig,
       });
       const stream = await graph.stream(
-        { messages: [{ type: "human", content: "foo", id: "initial-message" }] },
+        {
+          messages: [{ type: "human", content: "foo", id: "initial-message" }],
+        },
         { streamMode: "values", ...globalConfig }
       );
 
@@ -2482,9 +2531,12 @@ describe.each(storageTypes)("API tests (%s storage)", (storageType) => {
       return { json: await res.json(), headers: res.headers };
     };
 
-    let res = await fetcher(new URL("/custom/my-route?aCoolParam=13", API_URL), {
-      headers: { "x-custom-input": "hey" },
-    });
+    let res = await fetcher(
+      new URL("/custom/my-route?aCoolParam=13", API_URL),
+      {
+        headers: { "x-custom-input": "hey" },
+      }
+    );
     expect(res.json).toEqual({ foo: "bar" });
     expect(res.headers.get("x-custom-output")).toEqual("hey");
     expect(res.headers.get("x-js-middleware")).toEqual("true");
@@ -2582,17 +2634,21 @@ describe.each(storageTypes)("API tests (%s storage)", (storageType) => {
     let onRunCreated: ((params: RunMetadata) => void) | undefined = undefined;
     const waitRun = new Promise<RunMetadata>((r) => (onRunCreated = r));
 
-    const stream = client.runs.stream(thread.thread_id, assistant.assistant_id, {
-      input: {
-        messages: [{ role: "human", content: "input" }],
-        sleep: { steps: 3, ms: 1000 },
-      },
-      streamResumable: true,
-      streamMode: ["values", "custom"],
-      config: globalConfig,
+    const stream = client.runs.stream(
+      thread.thread_id,
+      assistant.assistant_id,
+      {
+        input: {
+          messages: [{ role: "human", content: "input" }],
+          sleep: { steps: 3, ms: 1000 },
+        },
+        streamResumable: true,
+        streamMode: ["values", "custom"],
+        config: globalConfig,
 
-      onRunCreated,
-    });
+        onRunCreated,
+      }
+    );
 
     const [join, source] = await Promise.all([
       (async () => {
@@ -2659,7 +2715,9 @@ describe.each(storageTypes)("API tests (%s storage)", (storageType) => {
         data: {
           name: "agent",
           result: {
-            messages: [expect.objectContaining({ content: "begin", type: "ai" })],
+            messages: [
+              expect.objectContaining({ content: "begin", type: "ai" }),
+            ],
           },
           interrupts: [],
         },

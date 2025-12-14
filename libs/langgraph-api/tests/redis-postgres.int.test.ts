@@ -101,12 +101,16 @@ describe("Redis + Postgres API", () => {
     cleanupRedis = redis.cleanup;
 
     const pool = new Pool({ connectionString: TEST_POSTGRES_URL });
-    testDbName = `lg_redis_test_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+    testDbName = `lg_redis_test_${Date.now()}_${Math.floor(
+      Math.random() * 1000
+    )}`;
 
     try {
       await pool.query(`CREATE DATABASE ${testDbName}`);
       console.log(`Created test database: ${testDbName}`);
-      testDbUrl = `${TEST_POSTGRES_URL.split("/").slice(0, -1).join("/")}/${testDbName}`;
+      testDbUrl = `${TEST_POSTGRES_URL.split("/")
+        .slice(0, -1)
+        .join("/")}/${testDbName}`;
     } finally {
       await pool.end();
     }
@@ -167,7 +171,10 @@ describe("Redis + Postgres API", () => {
       await streamManager2.connect();
 
       try {
-        const ops2 = new PostgresOps({ uri: testDbUrl, streamManager: streamManager2 });
+        const ops2 = new PostgresOps({
+          uri: testDbUrl,
+          streamManager: streamManager2,
+        });
         const runId = uuid4();
 
         await ops.runs.stream.publish({
@@ -235,7 +242,10 @@ describe("Redis + Postgres API", () => {
       await streamManager2.connect();
 
       try {
-        const ops2 = new PostgresOps({ uri: testDbUrl, streamManager: streamManager2 });
+        const ops2 = new PostgresOps({
+          uri: testDbUrl,
+          streamManager: streamManager2,
+        });
         const runId = uuid4();
 
         const signal = await ops.streamManager.lockWithControl!(runId);
@@ -257,7 +267,10 @@ describe("Redis + Postgres API", () => {
       await streamManager2.connect();
 
       try {
-        const ops2 = new PostgresOps({ uri: testDbUrl, streamManager: streamManager2 });
+        const ops2 = new PostgresOps({
+          uri: testDbUrl,
+          streamManager: streamManager2,
+        });
         const runId = uuid4();
 
         const signal = await ops.streamManager.lockWithControl!(runId);

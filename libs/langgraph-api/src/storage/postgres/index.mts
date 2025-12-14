@@ -78,3 +78,4 @@ export {
   type CreatePostgresOpsOptions,
 } from "./ops.mjs";
 export { PostgresNotifier } from "./notifier.mjs";
+export { withRetry, isRetryableError, type RetryOptions } from "./retry.mjs";

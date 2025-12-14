@@ -143,8 +143,7 @@ const worker = async (
     if (error instanceof Error) exception = error;
 
     const isAbort =
-      signal.aborted ||
-      (error instanceof Error && error.name === "AbortError");
+      signal.aborted || (error instanceof Error && error.name === "AbortError");
     const abortReason = signal.reason as string | undefined;
 
     if (isAbort && abortReason === "interrupt") {

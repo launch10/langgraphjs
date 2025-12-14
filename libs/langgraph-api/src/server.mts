@@ -221,7 +221,14 @@ export async function startServer(
       const { runs, threads, assistants, checkpointer, store, full } =
         c.req.valid("json");
 
-      await ops.truncate({ runs, threads, assistants, checkpointer, store, full });
+      await ops.truncate({
+        runs,
+        threads,
+        assistants,
+        checkpointer,
+        store,
+        full,
+      });
       return c.json({ ok: true });
     }
   );

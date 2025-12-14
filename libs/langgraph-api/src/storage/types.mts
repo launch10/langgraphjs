@@ -547,7 +547,10 @@ export interface StreamManager {
    * Publish a control signal to a run (Redis only).
    * For in-memory, use getControl().abort() directly.
    */
-  publishControl?(runId: string, action: "interrupt" | "rollback"): Promise<void>;
+  publishControl?(
+    runId: string,
+    action: "interrupt" | "rollback"
+  ): Promise<void>;
 }
 
 /**

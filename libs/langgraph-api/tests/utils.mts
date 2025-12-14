@@ -40,15 +40,15 @@ export async function truncate(
           checkpointer: true,
         }
       : options === "full"
-        ? {
-            runs: true,
-            threads: true,
-            assistants: true,
-            store: true,
-            checkpointer: true,
-            full: true,
-          }
-        : options;
+      ? {
+          runs: true,
+          threads: true,
+          assistants: true,
+          store: true,
+          checkpointer: true,
+          full: true,
+        }
+      : options;
 
   await fetch(`${apiUrl}/internal/truncate`, {
     method: "POST",

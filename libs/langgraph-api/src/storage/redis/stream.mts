@@ -5,8 +5,16 @@ import type {
   StreamQueue,
   StreamAbortController,
 } from "../types.mjs";
+import { withRetry, type RetryOptions } from "./retry.mjs";
 
 export type { Message };
+
+const DEFAULT_RETRY_OPTIONS: RetryOptions = {
+  maxAttempts: 3,
+  initialDelayMs: 100,
+  maxDelayMs: 5000,
+  backoffFactor: 2,
+};
 
 class TimeoutError extends Error {
   constructor() {
@@ -22,7 +30,10 @@ class AbortError extends Error {
   }
 }
 
-class CancellationAbortController extends AbortController implements StreamAbortController {
+class CancellationAbortController
+  extends AbortController
+  implements StreamAbortController
+{
   abort(reason: "rollback" | "interrupt") {
     super.abort(reason);
   }
@@ -50,10 +61,14 @@ export class RedisQueue implements StreamQueue {
       throw new Error("Redis client not connected");
     }
 
-    await client.xAdd(this.streamKey, "*", {
-      topic: item.topic,
-      data: JSON.stringify(item.data),
-    });
+    await withRetry(
+      () =>
+        client.xAdd(this.streamKey, "*", {
+          topic: item.topic,
+          data: JSON.stringify(item.data),
+        }),
+      DEFAULT_RETRY_OPTIONS
+    );
   }
 
   async get(options: {
@@ -87,9 +102,13 @@ export class RedisQueue implements StreamQueue {
         throw new AbortError();
       }
 
-      const results = await client.xRead(
-        { key: this.streamKey, id: startId },
-        { BLOCK: blockTime, COUNT: 1 }
+      const results = await withRetry(
+        () =>
+          client.xRead(
+            { key: this.streamKey, id: startId },
+            { BLOCK: blockTime, COUNT: 1 }
+          ),
+        DEFAULT_RETRY_OPTIONS
       );
 
       if (results && results.length > 0) {
@@ -202,7 +221,10 @@ export class RedisStreamManager implements StreamManager {
     if (!this.client) {
       throw new Error("Redis client not connected");
     }
-    await this.client.publish(this.getControlChannel(runId), action);
+    await withRetry(
+      () => this.client!.publish(this.getControlChannel(runId), action),
+      DEFAULT_RETRY_OPTIONS
+    );
   }
 
   async subscribeControl(
@@ -215,13 +237,20 @@ export class RedisStreamManager implements StreamManager {
 
     const channel = this.getControlChannel(runId);
 
-    await this.subscriberClient.subscribe(channel, (message) => {
-      callback(message as ControlAction);
-    });
+    await withRetry(
+      () =>
+        this.subscriberClient!.subscribe(channel, (message) => {
+          callback(message as ControlAction);
+        }),
+      DEFAULT_RETRY_OPTIONS
+    );
 
     const unsubscribe = async () => {
       if (this.subscriberClient) {
-        await this.subscriberClient.unsubscribe(channel);
+        await withRetry(
+          () => this.subscriberClient!.unsubscribe(channel),
+          DEFAULT_RETRY_OPTIONS
+        );
       }
     };
 

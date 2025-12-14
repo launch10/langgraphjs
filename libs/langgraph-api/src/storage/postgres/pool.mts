@@ -30,8 +30,9 @@
  * @module storage/postgres/pool
  */
 
-import type { Pool as PoolType } from "pg";
+import type { Pool as PoolType, QueryResult, QueryResultRow } from "pg";
 import * as pg from "pg";
+import { withRetry, type RetryOptions } from "./retry.mjs";
 
 const { Pool } = pg.default ?? pg;
 
@@ -180,6 +181,34 @@ class PostgresPoolManager {
       await this.pool.end();
       this.pool = null;
     }
+  }
+
+  /**
+   * Execute a query with automatic retry for transient failures.
+   *
+   * Wraps pool.query() with exponential backoff retry logic for connection
+   * errors, timeouts, and other transient failures.
+   *
+   * @param text - SQL query string
+   * @param values - Query parameters
+   * @param retryOptions - Optional retry configuration
+   * @returns Query result
+   *
+   * @example
+   * ```typescript
+   * const result = await poolManager.query(
+   *   "SELECT * FROM users WHERE id = $1",
+   *   [userId]
+   * );
+   * ```
+   */
+  async query<T extends QueryResultRow = QueryResultRow>(
+    text: string,
+    values?: unknown[],
+    retryOptions?: RetryOptions
+  ): Promise<QueryResult<T>> {
+    const pool = await this.getPool();
+    return withRetry(() => pool.query<T>(text, values), retryOptions);
   }
 }
 

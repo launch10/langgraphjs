@@ -38,7 +38,12 @@ describe.each(storageTypes)("Auth tests (%s storage)", (storageType) => {
     if (process.env.TURBO_HASH) {
       server = spawn(
         "tsx",
-        ["./tests/utils.server.mts", "--dev", "-c", "./graphs/langgraph.auth.json"],
+        [
+          "./tests/utils.server.mts",
+          "--dev",
+          "-c",
+          "./graphs/langgraph.auth.json",
+        ],
         {
           stdio: "overlapped",
           env: {

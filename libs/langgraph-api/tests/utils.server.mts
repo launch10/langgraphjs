@@ -24,8 +24,8 @@ if (typeof config.env === "string") {
 const storageType = process.env.STORAGE_TYPE ?? "postgres";
 const postgresUri =
   storageType === "postgres"
-    ? (process.env.POSTGRES_URI ??
-      "postgres://user:password@127.0.0.1:5434/testdb?sslmode=disable")
+    ? process.env.POSTGRES_URI ??
+      "postgres://user:password@127.0.0.1:5434/testdb?sslmode=disable"
     : undefined;
 
 const { spawnServer } = (

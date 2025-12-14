@@ -9,7 +9,9 @@ import type { StorageEnv } from "../storage/types.mjs";
 
 const api = new Hono<StorageEnv>();
 
-const getStore = async (c: { var: { LANGGRAPH_OPS: StorageEnv["Variables"]["LANGGRAPH_OPS"] } }): Promise<BaseStore> => {
+const getStore = async (c: {
+  var: { LANGGRAPH_OPS: StorageEnv["Variables"]["LANGGRAPH_OPS"] };
+}): Promise<BaseStore> => {
   const ops = c.var.LANGGRAPH_OPS;
   if (ops.getStore) {
     return ops.getStore();

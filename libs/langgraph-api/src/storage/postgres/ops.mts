@@ -49,7 +49,10 @@ import { getLangGraphCommand, type RunCommand } from "../../command.mjs";
 import { getGraph } from "../../graph/load.mjs";
 import { logger } from "../../logging.mjs";
 import { serializeError } from "../../utils/serde.mjs";
-import { poolManager, type PostgresConfig as BasePostgresConfig } from "./pool.mjs";
+import {
+  poolManager,
+  type PostgresConfig as BasePostgresConfig,
+} from "./pool.mjs";
 import { PostgresNotifier } from "./notifier.mjs";
 import type {
   Metadata,
@@ -178,7 +181,10 @@ class InMemoryQueue implements StreamQueue {
   }
 }
 
-class CancellationAbortController extends AbortController implements StreamAbortController {
+class CancellationAbortController
+  extends AbortController
+  implements StreamAbortController
+{
   abort(reason: "rollback" | "interrupt") {
     super.abort(reason);
   }
@@ -358,7 +364,9 @@ export class PostgresOps implements Ops {
     if (this.storePromise == null) {
       this.storePromise = (async () => {
         if (this.storeInstance == null) {
-          const { PostgresStore } = await import("@langchain/langgraph-checkpoint-postgres/store");
+          const { PostgresStore } = await import(
+            "@langchain/langgraph-checkpoint-postgres/store"
+          );
           const store = PostgresStore.fromConnString(this.config.uri, {
             schema: this.config.schema ?? "public",
           });
@@ -2594,7 +2602,9 @@ export async function createPostgresOps(
     const redisStream = new RedisStreamManager(options.redisUrl);
     await redisStream.connect();
     streamManager = redisStream;
-    logger.info("Using Redis for stream management (horizontal scaling enabled)");
+    logger.info(
+      "Using Redis for stream management (horizontal scaling enabled)"
+    );
   } else {
     logger.info("Using in-memory stream manager (single instance mode)");
   }
