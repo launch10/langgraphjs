@@ -1,5 +1,6 @@
 import { useRef, useEffect, useReducer, useCallback } from "react";
 import { detectAccess, type AccessMap } from "./access-detector.js";
+import type { SharedChatRegistry } from "../ui/streaming/registry.js";
 
 function shallowEqual<T>(a: T, b: T): boolean {
   if (Object.is(a, b)) return true;
@@ -42,12 +43,13 @@ function shallowEqual<T>(a: T, b: T): boolean {
 }
 
 export function useSmartSubscription<
+  TState extends Record<string, unknown>,
   TSnapshot extends Record<string, unknown>,
   TSelected,
 >(
-  getSnapshot: () => TSnapshot,
-  selector?: (snapshot: TSnapshot) => TSelected,
-  subscribe?: (callback: () => void) => () => void
+  registry: SharedChatRegistry<TState>,
+  selector: ((snapshot: TSnapshot) => TSelected) | undefined,
+  getSnapshot: () => TSnapshot
 ): TSelected extends undefined ? TSnapshot : TSelected {
   const [, forceRender] = useReducer((x: number) => x + 1, 0);
   const accessMapRef = useRef<AccessMap | null>(null);
@@ -61,7 +63,10 @@ export function useSmartSubscription<
 
   if (selector && !accessMapRef.current) {
     const snapshot = getSnapshot();
-    accessMapRef.current = detectAccess(selector, snapshot);
+    accessMapRef.current = detectAccess(
+      selector as (s: Record<string, unknown>) => unknown,
+      snapshot as Record<string, unknown>
+    );
   }
 
   const checkForUpdates = useCallback(() => {
@@ -75,9 +80,57 @@ export function useSmartSubscription<
   }, [getSnapshot, selector]);
 
   useEffect(() => {
-    if (!subscribe) return;
-    return subscribe(checkForUpdates);
-  }, [subscribe, checkForUpdates]);
+    const unsubs: Array<() => void> = [];
+
+    if (!selector) {
+      unsubs.push(registry.registerStateCallback(checkForUpdates));
+      unsubs.push(registry.registerMessagesCallback(checkForUpdates));
+      unsubs.push(registry.registerToolsCallback(checkForUpdates));
+      unsubs.push(registry.registerErrorCallback(checkForUpdates));
+      unsubs.push(registry.registerIsLoadingCallback(checkForUpdates));
+      unsubs.push(registry.registerIsHistoryLoadingCallback(checkForUpdates));
+      unsubs.push(registry.registerStreamCallback(checkForUpdates));
+      return () => unsubs.forEach((fn) => fn());
+    }
+
+    const accessed = accessMapRef.current!;
+
+    if (accessed.uiMessages) {
+      unsubs.push(registry.registerMessagesCallback(checkForUpdates));
+    }
+
+    if (accessed.tools) {
+      unsubs.push(registry.registerToolsCallback(checkForUpdates));
+    }
+
+    if (accessed.error) {
+      unsubs.push(registry.registerErrorCallback(checkForUpdates));
+    }
+
+    if (accessed.isLoading) {
+      unsubs.push(registry.registerIsLoadingCallback(checkForUpdates));
+    }
+
+    if (accessed.isThreadLoading) {
+      unsubs.push(registry.registerIsHistoryLoadingCallback(checkForUpdates));
+    }
+
+    if (accessed.state) {
+      if (accessed.stateKeys.size > 0) {
+        for (const key of accessed.stateKeys) {
+          unsubs.push(registry.registerStateKeyCallback(key, checkForUpdates));
+        }
+      } else {
+        unsubs.push(registry.registerStateCallback(checkForUpdates));
+      }
+    }
+
+    if (accessed.values || accessed.messages || accessed.history || accessed.branch || accessed.interrupt) {
+      unsubs.push(registry.registerStreamCallback(checkForUpdates));
+    }
+
+    return () => unsubs.forEach((fn) => fn());
+  }, [registry, selector, checkForUpdates]);
 
   const snapshot = getSnapshot();
   const result = selector ? selector(snapshot) : snapshot;

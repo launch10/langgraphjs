@@ -3,13 +3,10 @@ import {
   useEffect,
   useMemo,
   useRef,
-  useState,
-  useSyncExternalStore,
 } from "react";
 import { Client, getClientConfigHash } from "../client.js";
 import type { ClientConfig } from "../client.js";
-import { StreamManager, EventStreamEvent } from "../ui/manager.js";
-import { MessageTupleManager } from "../ui/messages.js";
+import type { EventStreamEvent } from "../ui/manager.js";
 import { getBranchContext } from "../ui/branching.js";
 import { unique } from "../ui/utils.js";
 import { useControllableThreadId } from "./thread.js";
@@ -26,10 +23,11 @@ import type {
 } from "../ui/streaming/types.js";
 import { isUIEvent } from "../ui/streaming/types.js";
 import type { Message } from "../types.messages.js";
-import type { ThreadState, Interrupt, Checkpoint , Metadata , Config } from "../schema.js";
+import type { ThreadState, Interrupt, Checkpoint, Metadata, Config } from "../schema.js";
 import type { StreamMode } from "../types.stream.js";
 import type { Command, MultitaskStrategy, OnCompletionBehavior, DisconnectMode, Durability } from "../types.js";
 import type { Sequence } from "../ui/branching.js";
+import { useSmartSubscription } from "./use-smart-subscription.js";
 
 export interface UseStreamUIOptions<
   TState extends Record<string, unknown>,
@@ -172,46 +170,6 @@ function fetchHistory<StateType extends Record<string, unknown>>(
   return client.threads.getHistory<StateType>(threadId, { limit });
 }
 
-function shallowEqual<T>(a: T, b: T): boolean {
-  if (Object.is(a, b)) return true;
-  if (
-    typeof a !== "object" ||
-    typeof b !== "object" ||
-    a === null ||
-    b === null
-  )
-    return false;
-
-  const aIsArray = Array.isArray(a);
-  const bIsArray = Array.isArray(b);
-  if (aIsArray !== bIsArray) return false;
-
-  if (aIsArray && bIsArray) {
-    if (a.length !== b.length) return false;
-    for (let i = 0; i < a.length; i += 1) {
-      if (!Object.is(a[i], b[i])) return false;
-    }
-    return true;
-  }
-
-  const aKeys = Object.keys(a);
-  const bKeys = Object.keys(b);
-  if (aKeys.length !== bKeys.length) return false;
-
-  for (const key of aKeys) {
-    if (
-      !Object.prototype.hasOwnProperty.call(b, key) ||
-      !Object.is(
-        (a as Record<string, unknown>)[key],
-        (b as Record<string, unknown>)[key]
-      )
-    ) {
-      return false;
-    }
-  }
-  return true;
-}
-
 export function useStreamUI<
   TState extends Record<string, unknown>,
   TSchema = unknown,
@@ -273,8 +231,9 @@ export function useStreamUI<
         apiUrl: options.apiUrl ?? "",
         threadId: threadId ?? undefined,
         merge,
+        throttle: options.throttle ?? false,
       }),
-    [merge, options.apiUrl, threadId]
+    [merge, options.apiUrl, options.throttle, threadId]
   );
 
   useEffect(() => {
@@ -282,15 +241,13 @@ export function useStreamUI<
     return () => SharedChatRegistry.release(registry);
   }, [registry]);
 
-  const [branch, setBranch] = useState<string>("");
+  const branchRef = useRef<string>("");
+  const setBranch = useCallback((newBranch: string) => {
+    branchRef.current = newBranch;
+    registry.notifyAllSubscribers();
+  }, [registry]);
 
-  const [messageManager] = useState(() => new MessageTupleManager());
-  const [stream] = useState(
-    () =>
-      new StreamManager<TState, Record<string, unknown>>(messageManager, {
-        throttle: options.throttle ?? false,
-      })
-  );
+  const stream = useMemo(() => registry.getOrCreateStreamManager(), [registry]);
 
   const threadIdRef = useRef<string | null>(threadId);
   const threadIdStreamingRef = useRef<string | null>(null);
@@ -425,6 +382,7 @@ export function useStreamUI<
   );
 
   const history = registry.getHistory();
+  const branch = branchRef.current;
   const branchContext = getBranchContext(branch, history.length > 0 ? history : undefined);
 
   const historyValues = useMemo(
@@ -582,6 +540,7 @@ export function useStreamUI<
       onError,
       onFinish,
       fetchHistoryData,
+      setBranch,
     ]
   );
 
@@ -601,21 +560,6 @@ export function useStreamUI<
     [registry]
   );
 
-  const selectorRef = useRef(selector);
-  selectorRef.current = selector;
-  const lastSelectedRef = useRef<TSelected | null>(null);
-  const lastSnapshotRef = useRef<UISnapshot<TState, TSchema> | null>(null);
-  const lastSnapshotDataRef = useRef<{
-    values: TState;
-    error: unknown;
-    isLoading: boolean;
-    isHistoryLoading: boolean;
-    state: Partial<TState>;
-    uiMessages: MessageWithBlocks<TSchema>[];
-    tools: ToolState[];
-    branch: string;
-  } | null>(null);
-
   const getSnapshot = useCallback(
     (): UISnapshot<TState, TSchema> => {
       const values = registry.getValues();
@@ -625,31 +569,18 @@ export function useStreamUI<
       const state = registry.getState();
       const uiMessages = registry.getMessages() as MessageWithBlocks<TSchema>[];
       const tools = registry.getTools();
-
-      const lastData = lastSnapshotDataRef.current;
-      if (
-        lastSnapshotRef.current &&
-        lastData &&
-        lastData.values === values &&
-        lastData.error === error &&
-        lastData.isLoading === isLoading &&
-        lastData.isHistoryLoading === isHistoryLoading &&
-        lastData.state === state &&
-        lastData.uiMessages === uiMessages &&
-        lastData.tools === tools &&
-        lastData.branch === branch
-      ) {
-        return lastSnapshotRef.current;
-      }
+      const currentBranch = branchRef.current;
+      const currentHistory = registry.getHistory();
+      const currentBranchContext = getBranchContext(currentBranch, currentHistory.length > 0 ? currentHistory : undefined);
 
       const snapshot: UISnapshot<TState, TSchema> = {
         values,
         error,
         isLoading,
         isThreadLoading: isHistoryLoading,
-        branch,
-        history: branchContext.flatHistory,
-        experimental_branchTree: branchContext.branchTree,
+        branch: currentBranch,
+        history: currentBranchContext.flatHistory,
+        experimental_branchTree: currentBranchContext.branchTree,
         interrupt: (() => {
           if (
             values != null &&
@@ -664,9 +595,9 @@ export function useStreamUI<
 
           if (isLoading) return undefined;
 
-          const interrupts = branchContext.threadHead?.tasks?.at(-1)?.interrupts;
+          const interrupts = currentBranchContext.threadHead?.tasks?.at(-1)?.interrupts;
           if (interrupts == null || interrupts.length === 0) {
-            const next = branchContext.threadHead?.next ?? [];
+            const next = currentBranchContext.threadHead?.next ?? [];
             if (!next.length || error != null) return undefined;
             return { when: "breakpoint" } as Interrupt;
           }
@@ -685,39 +616,18 @@ export function useStreamUI<
         assistantId: options.assistantId,
       };
 
-      lastSnapshotRef.current = snapshot;
-      lastSnapshotDataRef.current = {
-        values,
-        error,
-        isLoading,
-        isHistoryLoading,
-        state,
-        uiMessages,
-        tools,
-        branch,
-      };
-
       return snapshot;
     },
-    [registry, branch, branchContext, getMessages, submit, stop, getSubgraphState, client, options.assistantId]
+    [registry, getMessages, submit, stop, setBranch, getSubgraphState, client, options.assistantId]
   );
 
-  const subscribe = useCallback(
-    (callback: () => void) => registry.subscribe(callback),
-    [registry]
+  const result = useSmartSubscription(
+    registry,
+    selector as ((snapshot: UISnapshot<TState, TSchema>) => TSelected) | undefined,
+    getSnapshot
   );
 
-  const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
-
-  if (selector) {
-    const selected = selector(snapshot);
-    if (!shallowEqual(lastSelectedRef.current, selected)) {
-      lastSelectedRef.current = selected;
-    }
-    return lastSelectedRef.current as TSelected;
-  }
-
-  return snapshot as UseStreamUIResult<TState, TSchema>;
+  return result as UseStreamUIResult<TState, TSchema> | TSelected;
 }
 
 export function useStreamUIState<

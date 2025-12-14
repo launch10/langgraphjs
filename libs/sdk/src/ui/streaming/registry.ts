@@ -6,11 +6,14 @@ import type {
   TextBlock,
 } from "./types.js";
 import type { ThreadState } from "../../schema.js";
+import { StreamManager } from "../manager.js";
+import { MessageTupleManager } from "../messages.js";
 
 export interface RegistryOptions<TState extends Record<string, unknown>> {
   apiUrl: string;
   threadId?: string;
   merge?: MergeReducers<TState>;
+  throttle?: number | boolean;
 }
 
 const registries = new Map<string, SharedChatRegistry<Record<string, unknown>>>();
@@ -34,11 +37,19 @@ export class SharedChatRegistry<TState extends Record<string, unknown>> {
 
   private stateSubscribers: Set<() => void> = new Set();
 
+  private stateKeySubscribers: Map<string, Set<() => void>> = new Map();
+
   private messageSubscribers: Set<() => void> = new Set();
 
   private toolSubscribers: Set<() => void> = new Set();
 
   private streamSubscribers: Set<() => void> = new Set();
+
+  private errorSubscribers: Set<() => void> = new Set();
+
+  private isLoadingSubscribers: Set<() => void> = new Set();
+
+  private isHistoryLoadingSubscribers: Set<() => void> = new Set();
 
   private streamValues: TState | null = null;
 
@@ -54,6 +65,12 @@ export class SharedChatRegistry<TState extends Record<string, unknown>> {
 
   private isHistoryLoading = false;
 
+  private streamManager: StreamManager<TState, Record<string, unknown>> | null = null;
+
+  private messageManager: MessageTupleManager | null = null;
+
+  private throttle: number | boolean = false;
+
   static getKey(apiUrl: string, threadId?: string): string {
     return `${apiUrl}::${threadId ?? "default"}`;
   }
@@ -66,7 +83,8 @@ export class SharedChatRegistry<TState extends Record<string, unknown>> {
     if (!registries.has(key)) {
       const registry = new SharedChatRegistry<TState>(
         key,
-        options.merge ?? ({} as MergeReducers<TState>)
+        options.merge ?? ({} as MergeReducers<TState>),
+        options.throttle ?? false
       );
       registries.set(key, registry as SharedChatRegistry<Record<string, unknown>>);
       refCounts.set(key, 0);
@@ -106,9 +124,10 @@ export class SharedChatRegistry<TState extends Record<string, unknown>> {
     refCounts.clear();
   }
 
-  private constructor(key: string, mergeReducers: MergeReducers<TState>) {
+  private constructor(key: string, mergeReducers: MergeReducers<TState>, throttle: number | boolean) {
     this.key = key;
     this.mergeReducers = mergeReducers;
+    this.throttle = throttle;
   }
 
   getState(): Partial<TState> {
@@ -135,6 +154,7 @@ export class SharedChatRegistry<TState extends Record<string, unknown>> {
     }
 
     this.notifyStateSubscribers();
+    this.notifyStateKeySubscribers(key as string);
   }
 
   private updateSubgraphState(
@@ -244,6 +264,7 @@ export class SharedChatRegistry<TState extends Record<string, unknown>> {
     if (this.streamIsLoading === isLoading) return;
     this.streamIsLoading = isLoading;
     this.notifyStreamSubscribers();
+    this.notifyIsLoadingSubscribers();
   }
 
   getError(): unknown {
@@ -253,6 +274,7 @@ export class SharedChatRegistry<TState extends Record<string, unknown>> {
   setError(error: unknown): void {
     this.streamError = error;
     this.notifyStreamSubscribers();
+    this.notifyErrorSubscribers();
   }
 
   getHistoryValues(): TState | null {
@@ -284,6 +306,7 @@ export class SharedChatRegistry<TState extends Record<string, unknown>> {
     if (this.isHistoryLoading === isLoading) return;
     this.isHistoryLoading = isLoading;
     this.notifyStreamSubscribers();
+    this.notifyIsHistoryLoadingSubscribers();
   }
 
   getValues(): TState {
@@ -339,6 +362,25 @@ export class SharedChatRegistry<TState extends Record<string, unknown>> {
     this.streamSubscribers.forEach((cb) => cb());
   }
 
+  private notifyStateKeySubscribers(key: string): void {
+    const callbacks = this.stateKeySubscribers.get(key);
+    if (callbacks) {
+      callbacks.forEach((cb) => cb());
+    }
+  }
+
+  private notifyErrorSubscribers(): void {
+    this.errorSubscribers.forEach((cb) => cb());
+  }
+
+  private notifyIsLoadingSubscribers(): void {
+    this.isLoadingSubscribers.forEach((cb) => cb());
+  }
+
+  private notifyIsHistoryLoadingSubscribers(): void {
+    this.isHistoryLoadingSubscribers.forEach((cb) => cb());
+  }
+
   resetForStream(): void {
     this.preStreamState = { ...this.uiState };
     this.tools = [];
@@ -365,5 +407,82 @@ export class SharedChatRegistry<TState extends Record<string, unknown>> {
 
   getKey(): string {
     return this.key;
+  }
+
+  registerStateCallback(callback: () => void): () => void {
+    this.stateSubscribers.add(callback);
+    return () => this.stateSubscribers.delete(callback);
+  }
+
+  registerStateKeyCallback(key: string, callback: () => void): () => void {
+    if (!this.stateKeySubscribers.has(key)) {
+      this.stateKeySubscribers.set(key, new Set());
+    }
+    this.stateKeySubscribers.get(key)!.add(callback);
+    return () => {
+      const callbacks = this.stateKeySubscribers.get(key);
+      if (callbacks) {
+        callbacks.delete(callback);
+        if (callbacks.size === 0) {
+          this.stateKeySubscribers.delete(key);
+        }
+      }
+    };
+  }
+
+  registerMessagesCallback(callback: () => void): () => void {
+    this.messageSubscribers.add(callback);
+    return () => this.messageSubscribers.delete(callback);
+  }
+
+  registerToolsCallback(callback: () => void): () => void {
+    this.toolSubscribers.add(callback);
+    return () => this.toolSubscribers.delete(callback);
+  }
+
+  registerErrorCallback(callback: () => void): () => void {
+    this.errorSubscribers.add(callback);
+    return () => this.errorSubscribers.delete(callback);
+  }
+
+  registerIsLoadingCallback(callback: () => void): () => void {
+    this.isLoadingSubscribers.add(callback);
+    return () => this.isLoadingSubscribers.delete(callback);
+  }
+
+  registerIsHistoryLoadingCallback(callback: () => void): () => void {
+    this.isHistoryLoadingSubscribers.add(callback);
+    return () => this.isHistoryLoadingSubscribers.delete(callback);
+  }
+
+  registerStreamCallback(callback: () => void): () => void {
+    this.streamSubscribers.add(callback);
+    return () => this.streamSubscribers.delete(callback);
+  }
+
+  getOrCreateStreamManager(): StreamManager<TState, Record<string, unknown>> {
+    if (!this.streamManager) {
+      this.messageManager = new MessageTupleManager();
+      this.streamManager = new StreamManager<TState, Record<string, unknown>>(
+        this.messageManager,
+        { throttle: this.throttle }
+      );
+    }
+    return this.streamManager;
+  }
+
+  getMessageManager(): MessageTupleManager | null {
+    return this.messageManager;
+  }
+
+  hasStreamManager(): boolean {
+    return this.streamManager !== null;
+  }
+
+  notifyAllSubscribers(): void {
+    this.notifyStateSubscribers();
+    this.notifyMessageSubscribers();
+    this.notifyToolSubscribers();
+    this.notifyStreamSubscribers();
   }
 }
