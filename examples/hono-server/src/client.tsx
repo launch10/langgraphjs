@@ -3,13 +3,13 @@ import { createRoot } from "react-dom/client";
 import {
   useStreamUI,
   MergeStrategies,
+  createPrefixedStableId,
   type MessageWithBlocks,
   type MessageBlock,
   type UISnapshot,
 } from "@langchain/langgraph-sdk/react";
 
 interface RawHeadline {
-  id: string;
   text: string;
   status?: string;
 }
@@ -22,7 +22,6 @@ interface Headline {
 }
 
 interface RawDescription {
-  id: string;
   text: string;
 }
 
@@ -31,15 +30,18 @@ interface Description {
   text: string;
 }
 
+const getHeadlineId = createPrefixedStableId<RawHeadline>("h", "text");
+const getDescriptionId = createPrefixedStableId<RawDescription>("d", "text");
+
 const toHeadline = (raw: RawHeadline): Headline => ({
-  id: raw.id,
+  id: getHeadlineId(raw),
   text: raw.text,
   locked: false,
   rejected: raw.status === "rejected",
 });
 
 const toDescription = (raw: RawDescription): Description => ({
-  id: raw.id,
+  id: getDescriptionId(raw),
   text: raw.text,
 });
 
@@ -128,7 +130,6 @@ function HeadlinesPanel() {
   const isLoading = useAdsChatIsLoading();
   const { setState } = useAdsChatActions();
 
-  console.log(headlines)
   const visibleHeadlines = headlines ? headlines.filter((h) => !h.rejected) : [];
 
   const handleToggleLock = useCallback((id: string) => {
@@ -137,8 +138,6 @@ function HeadlinesPanel() {
     );
     setState({ headlines: updated });
   }, [headlines, setState]);
-
-  console.log("[HeadlinesPanel] render", { count: visibleHeadlines.length });
 
   return (
     <div style={{ marginBottom: 16 }}>
@@ -188,8 +187,6 @@ function DescriptionsPanel() {
   const descriptions = useAdsChatDescriptions() ?? [];
   const isLoading = useAdsChatIsLoading();
 
-  console.log("[DescriptionsPanel] render", { count: descriptions.length });
-
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
@@ -219,8 +216,6 @@ function DescriptionsPanel() {
 function LockedHeadlinesPanel() {
   const headlines = useAdsChatHeadlines() ?? [];
   const lockedHeadlines = headlines.filter((h) => h.locked);
-
-  console.log("[LockedHeadlinesPanel] render", { count: lockedHeadlines.length });
 
   return (
     <div style={{ padding: 16, background: "#1a2e1a", borderRadius: 8, border: "1px solid #2d5a2d" }}>
@@ -361,8 +356,6 @@ function MessagesPanel() {
   const isLoading = useAdsChatIsLoading();
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  console.log("[MessagesPanel] render", { count: uiMessages.length });
-
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [uiMessages]);
@@ -393,8 +386,6 @@ function ChatInput() {
   const [input, setInput] = useState("premium organic coffee beans");
   const { submit } = useAdsChatActions();
   const isLoading = useAdsChatIsLoading();
-
-  console.log("[ChatInput] render");
 
   const handleSubmit = useCallback(
     (e: React.FormEvent) => {
@@ -449,8 +440,6 @@ function ChatInput() {
 function StatusBar() {
   const { isLoading, error, threadId } = useAdsChatStatus();
 
-  console.log("[StatusBar] render");
-
   return (
     <div style={{ marginBottom: 10, fontSize: 12, color: "#9ca3af" }}>
       Status: {isLoading ? "streaming..." : "ready"}
@@ -461,8 +450,6 @@ function StatusBar() {
 }
 
 function AdsChat() {
-  console.log("[AdsChat] render");
-
   return (
     <div style={{ maxWidth: 700, margin: "0 auto", padding: 20, fontFamily: "system-ui, sans-serif" }}>
       <h1 style={{ marginBottom: 8 }}>LangGraph Streaming UI Demo</h1>
@@ -503,7 +490,6 @@ function AdsChat() {
 }
 
 function App() {
-  console.log("[App] render");
   return <AdsChat />;
 }
 

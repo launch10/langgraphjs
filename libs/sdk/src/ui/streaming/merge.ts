@@ -151,3 +151,4 @@ export const MergeStrategies = {
 };
 
 export type { MergeReducer, MergeReducers, TransformReducer, TransformReducers } from "./types.js";
+export { stableHash, createStableId, createPrefixedStableId } from "./hash.js";

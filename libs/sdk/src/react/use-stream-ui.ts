@@ -34,6 +34,12 @@ import type { Command, MultitaskStrategy, OnCompletionBehavior, DisconnectMode, 
 import type { Sequence } from "../ui/branching.js";
 import { useSmartSubscription } from "./use-smart-subscription.js";
 
+export interface RunMetadataStorage {
+  getItem(key: `lg:stream:${string}`): string | null;
+  setItem(key: `lg:stream:${string}`, value: string): void;
+  removeItem(key: `lg:stream:${string}`): void;
+}
+
 export interface UseStreamUIOptions<
   TState extends Record<string, unknown>,
   TSchema = unknown,
@@ -70,6 +76,13 @@ export interface UseStreamUIOptions<
       ) => void;
     }
   ) => void;
+  reconnectOnMount?: boolean | (() => RunMetadataStorage);
+  onCreated?: (run: { run_id: string; thread_id: string }) => void;
+  onStop?: (options: {
+    mutate: (
+      update: Partial<TState> | ((prev: TState) => Partial<TState>)
+    ) => void;
+  }) => void;
 }
 
 export interface UISubmitOptions<
@@ -121,6 +134,11 @@ export interface UISnapshot<
   getSubgraphState: (
     namespace: string[]
   ) => Partial<Record<string, unknown>> | undefined;
+  joinStream: (
+    runId: string,
+    lastEventId?: string,
+    options?: { streamMode?: StreamMode | StreamMode[] }
+  ) => Promise<void>;
   client: Client;
   assistantId: string;
   threadId: string | null;
@@ -152,6 +170,11 @@ export interface UseStreamUIResult<
   getSubgraphState: (
     namespace: string[]
   ) => Partial<Record<string, unknown>> | undefined;
+  joinStream: (
+    runId: string,
+    lastEventId?: string,
+    options?: { streamMode?: StreamMode | StreamMode[] }
+  ) => Promise<void>;
   threadId: string | null;
   client: Client;
   assistantId: string;
@@ -215,7 +238,19 @@ export function useStreamUI<
     onCustomEvent: userOnCustomEvent,
     onError,
     onFinish,
+    onCreated,
+    onStop,
   } = options;
+
+  const reconnectOnMountRef = useRef(options.reconnectOnMount ?? true);
+  const runMetadataStorage = useMemo(() => {
+    if (typeof window === "undefined") return null;
+    const storage = reconnectOnMountRef.current;
+    if (storage === false) return null;
+    if (storage === true) return window.sessionStorage;
+    if (typeof storage === "function") return storage();
+    return window.sessionStorage;
+  }, []);
 
   const client = useMemo(
     () =>
@@ -444,8 +479,27 @@ export function useStreamUI<
   );
 
   const stop = useCallback(async () => {
-    await stream.stop(historyValues, {});
-  }, [stream, historyValues]);
+    await stream.stop(historyValues, {
+      onStop: () => {
+        if (runMetadataStorage && threadId) {
+          const runId = runMetadataStorage.getItem(`lg:stream:${threadId}`);
+          if (runId) void client.runs.cancel(threadId, runId);
+          runMetadataStorage.removeItem(`lg:stream:${threadId}`);
+        }
+
+        onStop?.({
+          mutate: (update) => {
+            if (typeof update === "function") {
+              const currentValues = registry.getValues();
+              registry.setState(update(currentValues));
+            } else {
+              registry.setState(update);
+            }
+          },
+        });
+      },
+    });
+  }, [stream, historyValues, runMetadataStorage, threadId, client, onStop, registry]);
 
   const submit = useCallback(
     async (
@@ -532,6 +586,9 @@ export function useStreamUI<
             ...values,
           };
 
+          const streamResumable =
+            submitOptions?.streamResumable ?? !!runMetadataStorage;
+
           return client.runs.stream(usableThreadId, options.assistantId, {
             input: inputWithState as Record<string, unknown>,
             config: submitOptions?.config,
@@ -542,13 +599,30 @@ export function useStreamUI<
             metadata: submitOptions?.metadata,
             multitaskStrategy: submitOptions?.multitaskStrategy,
             onCompletion: submitOptions?.onCompletion,
-            onDisconnect: submitOptions?.onDisconnect ?? "cancel",
+            onDisconnect:
+              submitOptions?.onDisconnect ??
+              (streamResumable ? "continue" : "cancel"),
             signal,
             checkpoint,
             streamMode,
             streamSubgraphs: submitOptions?.streamSubgraphs,
-            streamResumable: submitOptions?.streamResumable,
+            streamResumable,
             durability: submitOptions?.durability,
+            onRunCreated(params) {
+              const callbackMeta = {
+                run_id: params.run_id,
+                thread_id: params.thread_id ?? usableThreadId!,
+              };
+
+              if (runMetadataStorage) {
+                runMetadataStorage.setItem(
+                  `lg:stream:${usableThreadId}`,
+                  callbackMeta.run_id
+                );
+              }
+
+              onCreated?.(callbackMeta);
+            },
           }) as AsyncGenerator<EventStreamEvent<TState, Partial<TState>, unknown>>;
         },
         {
@@ -560,6 +634,10 @@ export function useStreamUI<
             onUpdateEvent: () => {},
           },
           async onSuccess() {
+            if (runMetadataStorage && usableThreadId) {
+              runMetadataStorage.removeItem(`lg:stream:${usableThreadId}`);
+            }
+
             if (onFinish || historyLimit) {
               const newHistory = await fetchHistoryData(usableThreadId!, historyLimit);
               const lastHead = newHistory?.at(0);
@@ -596,10 +674,111 @@ export function useStreamUI<
       processCustomEvent,
       onError,
       onFinish,
+      onCreated,
       fetchHistoryData,
       setBranch,
+      runMetadataStorage,
     ]
   );
+
+  const joinStream = useCallback(
+    async (
+      runId: string,
+      lastEventId?: string,
+      joinOptions?: { streamMode?: StreamMode | StreamMode[] }
+    ) => {
+      // eslint-disable-next-line no-param-reassign
+      lastEventId ??= "-1";
+      if (!threadId) return;
+
+      registry.resetForStream();
+      processorRef.current.reset();
+
+      await stream.start(
+        async (signal: AbortSignal) => {
+          threadIdStreamingRef.current = threadId;
+          registry.setIsLoading(true);
+
+          return client.runs.joinStream(threadId, runId, {
+            signal,
+            lastEventId,
+            streamMode: joinOptions?.streamMode,
+          }) as AsyncGenerator<EventStreamEvent<TState, Partial<TState>, unknown>>;
+        },
+        {
+          getMessages,
+          setMessages,
+          initialValues: historyValues,
+          callbacks: {
+            onCustomEvent: processCustomEvent,
+            onUpdateEvent: () => {},
+          },
+          async onSuccess() {
+            if (runMetadataStorage) {
+              runMetadataStorage.removeItem(`lg:stream:${threadId}`);
+            }
+
+            const newHistory = await fetchHistoryData(threadId, historyLimit);
+            const lastHead = newHistory?.at(0);
+            if (lastHead && onFinish) {
+              onFinish(lastHead);
+            }
+          },
+          onError(streamError) {
+            registry.setError(streamError);
+            onError?.(streamError);
+          },
+          onFinish() {
+            threadIdStreamingRef.current = null;
+            registry.setIsLoading(false);
+          },
+        }
+      );
+    },
+    [
+      threadId,
+      client,
+      stream,
+      registry,
+      getMessages,
+      setMessages,
+      historyValues,
+      processCustomEvent,
+      runMetadataStorage,
+      fetchHistoryData,
+      historyLimit,
+      onFinish,
+      onError,
+    ]
+  );
+
+  const reconnectKey = useMemo(() => {
+    if (!runMetadataStorage || stream.isLoading) return undefined;
+    if (typeof window === "undefined") return undefined;
+    if (!threadId) return undefined;
+    const runId = runMetadataStorage.getItem(`lg:stream:${threadId}`);
+    if (!runId) return undefined;
+    return { runId, threadId };
+  }, [runMetadataStorage, stream.isLoading, threadId]);
+
+  const shouldReconnect = !!runMetadataStorage;
+  const reconnectRef = useRef({ threadId, shouldReconnect });
+
+  const joinStreamRef = useRef<typeof joinStream>(joinStream);
+  joinStreamRef.current = joinStream;
+
+  useEffect(() => {
+    if (reconnectRef.current.threadId !== threadId) {
+      reconnectRef.current = { threadId, shouldReconnect };
+    }
+  }, [threadId, shouldReconnect]);
+
+  useEffect(() => {
+    if (reconnectKey && reconnectRef.current.shouldReconnect) {
+      reconnectRef.current.shouldReconnect = false;
+      void joinStreamRef.current(reconnectKey.runId);
+    }
+  }, [reconnectKey]);
 
   useEffect(() => {
     const unsubscribe = stream.subscribe(() => {
@@ -676,6 +855,7 @@ export function useStreamUI<
         setBranch,
         setState,
         getSubgraphState,
+        joinStream,
         client,
         assistantId: options.assistantId,
         threadId,
@@ -683,7 +863,7 @@ export function useStreamUI<
 
       return snapshot;
     },
-    [registry, getMessages, submit, stop, setBranch, setState, getSubgraphState, client, options.assistantId, threadId]
+    [registry, getMessages, submit, stop, setBranch, setState, getSubgraphState, joinStream, client, options.assistantId, threadId]
   );
 
   const result = useSmartSubscription(

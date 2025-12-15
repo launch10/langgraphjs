@@ -7,6 +7,7 @@ import {
 import { logError, logger } from "./logging.mjs";
 import { serializeError } from "./utils/serde.mjs";
 import { callWebhook } from "./webhook.mjs";
+import { runWithParsingContext } from "./utils/parsing-context.mjs";
 
 const MAX_RETRY_ATTEMPTS = 3;
 const NOTIFICATION_TIMEOUT_MS = 5000;
@@ -107,15 +108,17 @@ const worker = async (
     const resumable = run.kwargs?.resumable ?? false;
 
     try {
-      const stream = streamState(run, {
-        attempt,
-        signal,
-        ...(!temporary ? { onCheckpoint, onTaskResult } : undefined),
-      });
+      await runWithParsingContext(async () => {
+        const stream = streamState(run, {
+          attempt,
+          signal,
+          ...(!temporary ? { onCheckpoint, onTaskResult } : undefined),
+        });
 
-      for await (const { event, data } of stream) {
-        await ops.runs.stream.publish({ runId, resumable, event, data });
-      }
+        for await (const { event, data } of stream) {
+          await ops.runs.stream.publish({ runId, resumable, event, data });
+        }
+      });
     } catch (error) {
       await ops.runs.stream.publish({
         runId,

@@ -11,7 +11,7 @@ import { ChatAnthropic } from "@langchain/anthropic";
 import { tool } from "@langchain/core/tools";
 import { AIMessage, type BaseMessage } from "@langchain/core/messages";
 import { z } from "zod";
-import { toStructuredMessage } from "@langchain/langgraph-api/utils";
+import { toStructuredMessage, createPrefixedStableId } from "@langchain/langgraph-api/utils";
 
 export interface Headline {
   id: string;
@@ -45,17 +45,22 @@ export const AdsAnnotation = Annotation.Root({
 
 export type AdsState = typeof AdsAnnotation.State;
 
-interface ParsedAdsOutput {
-  headlines?: Array<{
-    id: string;
-    text: string;
-    status?: string;
-  }>;
-  descriptions?: Array<{
-    id: string;
-    text: string;
-  }>;
+interface RawHeadline {
+  text: string;
+  status?: string;
 }
+
+interface RawDescription {
+  text: string;
+}
+
+interface ParsedAdsOutput {
+  headlines?: RawHeadline[];
+  descriptions?: RawDescription[];
+}
+
+const getHeadlineId = createPrefixedStableId<RawHeadline>("h", "text");
+const getDescriptionId = createPrefixedStableId<RawDescription>("d", "text");
 
 const SYSTEM_PROMPT = `You are an expert Google Ads copywriter. When given a business description, generate compelling ad copy.
 
@@ -64,19 +69,18 @@ Always respond with some friendly text explaining what you're creating, then inc
 \`\`\`json
 {
   "headlines": [
-    {"id": "h1", "text": "Headline 1 text", "status": "pending"},
-    {"id": "h2", "text": "Headline 2 text", "status": "pending"},
-    {"id": "h3", "text": "Headline 3 text", "status": "pending"}
+    {"text": "Headline 1 text", "status": "pending"},
+    {"text": "Headline 2 text", "status": "pending"},
+    {"text": "Headline 3 text", "status": "pending"}
   ],
   "descriptions": [
-    {"id": "d1", "text": "Description 1 text"},
-    {"id": "d2", "text": "Description 2 text"}
+    {"text": "Description 1 text"},
+    {"text": "Description 2 text"}
   ]
 }
 \`\`\`
 
-Headlines should be max 30 characters. Descriptions should be max 90 characters.
-Generate unique IDs for each item (h1, h2, etc for headlines, d1, d2 for descriptions).`;
+Headlines should be max 30 characters. Descriptions should be max 90 characters.`;
 
 const adsFaqTool = tool(
   async ({ query }) => {
@@ -128,7 +132,7 @@ async function adsAgentNode(
   
   if (parsed?.headlines) {
     updates.headlines = parsed.headlines.map((h) => ({
-      id: h.id,
+      id: getHeadlineId(h),
       text: h.text,
       locked: false,
       rejected: h.status === "rejected",
@@ -137,7 +141,7 @@ async function adsAgentNode(
   
   if (parsed?.descriptions) {
     updates.descriptions = parsed.descriptions.map((d) => ({
-      id: d.id,
+      id: getDescriptionId(d),
       text: d.text,
     }));
   }

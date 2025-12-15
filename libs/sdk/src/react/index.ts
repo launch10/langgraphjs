@@ -10,6 +10,7 @@ export {
   type UseStreamUIResult,
   type UISubmitOptions,
   type UISnapshot,
+  type RunMetadataStorage,
 } from "./use-stream-ui.js";
 export {
   useStreamUIState,
@@ -44,7 +45,7 @@ export type {
   UseStreamThread,
 } from "./types.js";
 
-export { MergeStrategies } from "../ui/streaming/merge.js";
+export { MergeStrategies, stableHash, createStableId, createPrefixedStableId } from "../ui/streaming/merge.js";
 export type {
   MessageWithBlocks,
   MessageBlock,

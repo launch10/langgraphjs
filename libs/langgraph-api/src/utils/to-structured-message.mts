@@ -1,6 +1,7 @@
 import { AIMessage, AIMessageChunk, BaseMessage, ContentBlock } from "@langchain/core/messages";
 import { parsePartialJson } from "@ai-sdk/ui-utils";
 import type { JSONBlockBelongsTo, ParsedBlock } from "./text-block-parser.mjs";
+import { getCachedStructuredData } from "./parsing-context.mjs";
 
 export type ToStructuredMessageResult<TSchema = unknown> = 
   [AIMessage | AIMessageChunk, TSchema];
@@ -94,6 +95,18 @@ async function parseStringContent<TSchema>(
   target: JSONBlockBelongsTo
 ): Promise<ToStructuredMessageResult<TSchema | undefined>> {
   const content = message.content as string;
+  
+  const cached = message.id ? getCachedStructuredData(message.id) : undefined;
+  if (cached && target === "state") {
+    const { preamble, postscript } = extractJson(content);
+    const blocks: ParsedBlock[] = [];
+    let idx = 0;
+    if (preamble) blocks.push(createParsedBlock("text", idx++, { sourceText: preamble }));
+    blocks.push(createParsedBlock("structured", idx++, { sourceText: content, data: cached.data }));
+    if (postscript) blocks.push(createParsedBlock("text", idx++, { sourceText: postscript }));
+    return [buildMessage(message, content, blocks), cached.data as TSchema];
+  }
+
   const parsed = await tryParseJson<TSchema>(content, target);
   
   if (!parsed) {

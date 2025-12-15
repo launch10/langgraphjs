@@ -1,5 +1,6 @@
 import { BaseMessageChunk, isBaseMessage } from "@langchain/core/messages";
 import { TextBlockParser } from "./utils/text-block-parser.mjs";
+import { cacheStructuredData } from "./utils/parsing-context.mjs";
 import { LangChainTracer } from "@langchain/core/tracers/tracer_langchain";
 import type {
   CheckpointMetadata,
@@ -410,6 +411,7 @@ export async function* streamState(
               if (parsers[message.id].hasJsonStart()) {
                 const [hasParsed, parsed] = await parsers[message.id].tryParseStructured();
                 if (hasParsed && parsed) {
+                  cacheStructuredData(message.id, parsed);
                   for (const [key, value] of Object.entries(parsed)) {
                     yield createUIEvent("ui:state:streaming", {
                       key,

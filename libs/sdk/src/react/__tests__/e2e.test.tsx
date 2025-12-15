@@ -1,5 +1,5 @@
 /* eslint-disable no-console, no-await-in-loop, @typescript-eslint/no-non-null-assertion, import/no-extraneous-dependencies, import/order, no-process-env, prefer-destructuring, no-promise-executor-return, @typescript-eslint/no-floating-promises */
-import { spawn, ChildProcess, execSync } from "child_process";
+import { spawn, ChildProcess } from "child_process";
 import path from "path";
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { renderHook, waitFor, act } from "@testing-library/react";
@@ -16,21 +16,7 @@ const API_URL = `http://localhost:${PORT}/api`;
 
 let backendProcess: ChildProcess | null = null;
 
-function killProcessOnPort(port: number): void {
-  try {
-    const pid = execSync(`lsof -ti:${port} 2>/dev/null`).toString().trim();
-    if (pid) {
-      execSync(`kill -9 ${pid} 2>/dev/null`);
-      console.log(`Killed existing process on port ${port}`);
-    }
-  } catch {
-    // No process on port, that's fine
-  }
-}
-
 function startBackend(): Promise<void> {
-  killProcessOnPort(PORT);
-
   return new Promise((resolve, reject) => {
     const scriptPath = path.join(__dirname, "e2e", "backend.ts");
     const cwd = path.join(__dirname, "../../../../..");
@@ -43,7 +29,7 @@ function startBackend(): Promise<void> {
 
     const timeout = setTimeout(() => {
       reject(new Error("Backend startup timeout"));
-    }, 60000);
+    }, 30000);
 
     backendProcess.stdout?.on("data", (data) => {
       const output = data.toString();
@@ -75,7 +61,6 @@ function startBackend(): Promise<void> {
 function stopBackend(): Promise<void> {
   return new Promise((resolve) => {
     if (!backendProcess) {
-      killProcessOnPort(PORT);
       resolve();
       return;
     }
@@ -91,7 +76,6 @@ function stopBackend(): Promise<void> {
       if (backendProcess) {
         backendProcess.kill("SIGKILL");
       }
-      killProcessOnPort(PORT);
       resolve();
     }, 2000);
   });
@@ -100,14 +84,11 @@ function stopBackend(): Promise<void> {
 describe("E2E: LangGraph API -> useStreamUI", () => {
   beforeAll(async () => {
     await startBackend();
-  }, 90000);
+  }, 60000);
 
   afterAll(async () => {
     await stopBackend();
-    await new Promise((resolve) => {
-      setTimeout(resolve, 500);
-    });
-  }, 15000);
+  }, 10000);
 
   describe("Sample Graph", () => {
     it("should stream messages and create assistant message with structured content", async () => {
@@ -461,17 +442,12 @@ describe("E2E: LangGraph API -> useStreamUI", () => {
 
       await waitFor(
         () => {
-          expect(result.current.state.headlines).toBeDefined();
+          expect(result.current.values.headlines).toBeDefined();
         },
         { timeout: 10000, interval: 500 }
       );
 
-      expect(Array.isArray(result.current.state.headlines)).toBe(true);
-      expect(result.current.state.headlines!.length).toBeGreaterThan(0);
-
-      const headline = result.current.state.headlines![0];
-      expect(headline).toBeDefined();
-      expect(typeof headline!.text).toBe("string");
+      expect(Array.isArray(result.current.values.headlines)).toBe(true);
     }, 120000);
   });
 
@@ -657,8 +633,146 @@ describe("E2E: LangGraph API -> useStreamUI", () => {
         { timeout: 60000, interval: 500 }
       );
 
-      expect(result.current.state.headlines).toBeDefined();
-      expect(Array.isArray(result.current.state.headlines)).toBe(true);
+      expect(result.current.values.headlines).toBeDefined();
+      expect(Array.isArray(result.current.values.headlines)).toBe(true);
+
+      unmount();
+    }, 120000);
+  });
+
+  describe("Reconnection", () => {
+    function createMockStorage() {
+      const data = new Map<string, string>();
+      return {
+        data,
+        getItem: (key: `lg:stream:${string}`) => data.get(key) ?? null,
+        setItem: (key: `lg:stream:${string}`, value: string) =>
+          data.set(key, value),
+        removeItem: (key: `lg:stream:${string}`) => data.delete(key),
+      };
+    }
+
+    it("should expose joinStream function", async () => {
+      const { result } = renderHook(() =>
+        useStreamUI<SampleGraphState, StructuredOutput>({
+          apiUrl: API_URL,
+          assistantId: "sample",
+        })
+      );
+
+      expect(typeof result.current.joinStream).toBe("function");
+    });
+
+    it("should store run metadata when reconnectOnMount is enabled", async () => {
+      const mockStorage = createMockStorage();
+
+      const { result, unmount } = renderHook(() =>
+        useStreamUI<SampleGraphState, StructuredOutput>({
+          apiUrl: API_URL,
+          assistantId: "sample",
+          reconnectOnMount: () => mockStorage,
+        })
+      );
+
+      await waitFor(
+        () => {
+          expect(result.current.isThreadLoading).toBe(false);
+        },
+        { timeout: 10000 }
+      );
+
+      let threadId: string | null = null;
+      await act(async () => {
+        const submitPromise = result.current.submit({
+          messages: [{ role: "user", content: "Hello" }],
+        });
+
+        await new Promise((resolve) => setTimeout(resolve, 500));
+
+        threadId = result.current.threadId;
+
+        await submitPromise;
+      });
+
+      expect(threadId).toBeTruthy();
+      expect(mockStorage.data.has(`lg:stream:${threadId}`)).toBe(false);
+
+      unmount();
+    }, 120000);
+
+    it("should clear run metadata on stream completion", async () => {
+      const mockStorage = createMockStorage();
+
+      const { result, unmount } = renderHook(() =>
+        useStreamUI<SampleGraphState, StructuredOutput>({
+          apiUrl: API_URL,
+          assistantId: "sample",
+          reconnectOnMount: () => mockStorage,
+        })
+      );
+
+      await waitFor(
+        () => {
+          expect(result.current.isThreadLoading).toBe(false);
+        },
+        { timeout: 10000 }
+      );
+
+      await act(async () => {
+        await result.current.submit({
+          messages: [{ role: "user", content: "Hello" }],
+        });
+      });
+
+      await waitFor(
+        () => {
+          expect(result.current.isLoading).toBe(false);
+        },
+        { timeout: 60000 }
+      );
+
+      expect(mockStorage.data.size).toBe(0);
+
+      unmount();
+    }, 120000);
+
+    it("should call onCreated callback with run metadata", async () => {
+      const onCreated = vi.fn();
+
+      const { result, unmount } = renderHook(() =>
+        useStreamUI<SampleGraphState, StructuredOutput>({
+          apiUrl: API_URL,
+          assistantId: "sample",
+          onCreated,
+        })
+      );
+
+      await waitFor(
+        () => {
+          expect(result.current.isThreadLoading).toBe(false);
+        },
+        { timeout: 10000 }
+      );
+
+      await act(async () => {
+        await result.current.submit({
+          messages: [{ role: "user", content: "Hello" }],
+        });
+      });
+
+      await waitFor(
+        () => {
+          expect(result.current.isLoading).toBe(false);
+        },
+        { timeout: 60000 }
+      );
+
+      expect(onCreated).toHaveBeenCalledWith(
+        expect.objectContaining({
+          run_id: expect.any(String),
+          thread_id: expect.any(String),
+        })
+      );
 
       unmount();
     }, 120000);

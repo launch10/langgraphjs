@@ -5,7 +5,7 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     include: ["src/react/__tests__/e2e.test.tsx"],
-    testTimeout: 180000,
-    hookTimeout: 90000,
+    testTimeout: 90000,
+    hookTimeout: 60000,
   },
 });
