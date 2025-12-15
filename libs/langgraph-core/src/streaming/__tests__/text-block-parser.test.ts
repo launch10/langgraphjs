@@ -61,7 +61,7 @@ describe("TextBlockParser", () => {
 
     it("returns text before JSON block", () => {
       parser.append("Here is some text\n\n```json\n{\"key\": \"value\"}\n```");
-      expect(parser.getStreamingText()).toBe("Here is some text\n\n");
+      expect(parser.getStreamingText()).toBe("Here is some text");
     });
 
     it("handles partial JSON block markers", () => {
@@ -256,10 +256,9 @@ describe("structured data extraction scenarios", () => {
       const [success, result] = await parser.tryParseStructured();
       const text = parser.getStreamingText();
       const postscript = parser.getPostscript();
-      console.log(result)
-      console.log(text)
-      console.log(postscript)
 
+      expect(text).toBe("Preamble text");
+      expect(postscript).toBe("Postscript text");
       expect(success).toBe(true);
       expect(result?.headlines).toHaveLength(2);
       expect(result?.headlines[0]).toEqual({

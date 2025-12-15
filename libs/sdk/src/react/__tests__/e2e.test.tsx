@@ -104,7 +104,10 @@ describe("E2E: LangGraph API -> useStreamUI", () => {
 
   afterAll(async () => {
     await stopBackend();
-  }, 10000);
+    await new Promise((resolve) => {
+      setTimeout(resolve, 500);
+    });
+  }, 15000);
 
   describe("Sample Graph", () => {
     it("should stream messages and create assistant message with structured content", async () => {
