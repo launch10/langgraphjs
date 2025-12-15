@@ -208,7 +208,7 @@ describe("tryParseJson", () => {
 
 describe("structured data extraction scenarios", () => {
   describe("ads-like structured output", () => {
-    interface AdsOutput {
+    type AdsOutput = {
       headlines: Array<{ id: string; text: string; status?: string }>;
       descriptions: Array<{ id: string; text: string }>;
     }
