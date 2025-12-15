@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { AIMessage } from "@langchain/core/messages";
-import { toStructuredMessage, type StateTransforms } from "../src/utils/index.mjs";
+import {
+  toStructuredMessage,
+  type StateTransforms,
+  runWithParsingContext,
+  cacheStructuredData,
+} from "../src/utils/index.mjs";
 
 describe("toStructuredMessage", () => {
   describe("basic parsing", () => {
@@ -144,7 +149,10 @@ Hope that helps!`,
 \`\`\``,
       });
 
-      const [, parsed] = await toStructuredMessage<RawOutput>(message, "messages");
+      const [, parsed] = await toStructuredMessage<RawOutput>(
+        message,
+        "messages"
+      );
 
       expect(parsed).toBeUndefined();
     });
@@ -206,18 +214,150 @@ Postscript text here.`,
       });
 
       const transforms: StateTransforms<{ items: { value: string }[] }> = {
-        items: (raw) =>
-          (raw as string[]).map((value) => ({ value })),
+        items: (raw) => (raw as string[]).map((value) => ({ value })),
       };
 
-      const [, parsed] = await toStructuredMessage<{ items: { value: string }[] }>(
-        message,
-        "state",
-        transforms
-      );
+      const [, parsed] = await toStructuredMessage<{
+        items: { value: string }[];
+      }>(message, "state", transforms);
 
       expect(parsed).toEqual({
         items: [{ value: "a" }, { value: "b" }],
+      });
+    });
+  });
+
+  describe("caching with transforms", () => {
+    interface TransformedItem {
+      id: string;
+      text: string;
+    }
+
+    interface TransformedState {
+      items: TransformedItem[];
+    }
+
+    it("should return cached transformed data instead of re-transforming", async () => {
+      const messageId = "test-msg-123";
+      const message = new AIMessage({
+        id: messageId,
+        content: `\`\`\`json
+{"items": ["apple", "banana"]}
+\`\`\``,
+      });
+
+      const transformsWithRandomIds: StateTransforms<TransformedState> = {
+        items: (raw) =>
+          (raw as string[]).map((text) => ({
+            id: crypto.randomUUID(),
+            text,
+          })),
+      };
+
+      await runWithParsingContext(async () => {
+        const firstTransformed = {
+          items: [
+            { id: "cached-id-1", text: "apple" },
+            { id: "cached-id-2", text: "banana" },
+          ],
+        };
+        cacheStructuredData(messageId, firstTransformed);
+
+        const [, parsed] = await toStructuredMessage<TransformedState>(
+          message,
+          "state",
+          transformsWithRandomIds
+        );
+
+        expect(parsed?.items[0].id).toBe("cached-id-1");
+        expect(parsed?.items[1].id).toBe("cached-id-2");
+      });
+    });
+
+    it("should apply transforms when no cached data exists", async () => {
+      const message = new AIMessage({
+        id: "fresh-msg-456",
+        content: `\`\`\`json
+{"items": ["test"]}
+\`\`\``,
+      });
+
+      let callCount = 0;
+      const countingTransforms: StateTransforms<TransformedState> = {
+        items: (raw) => {
+          callCount++;
+          return (raw as string[]).map((text, i) => ({
+            id: `fresh-${i}`,
+            text,
+          }));
+        },
+      };
+
+      await runWithParsingContext(async () => {
+        const [, parsed] = await toStructuredMessage<TransformedState>(
+          message,
+          "state",
+          countingTransforms
+        );
+
+        expect(callCount).toBe(1);
+        expect(parsed?.items[0].id).toBe("fresh-0");
+      });
+    });
+
+    it("should NOT call transforms when using cached data", async () => {
+      const messageId = "no-transform-msg";
+      const message = new AIMessage({
+        id: messageId,
+        content: `\`\`\`json
+{"items": ["x"]}
+\`\`\``,
+      });
+
+      let transformCalled = false;
+      const trackingTransforms: StateTransforms<TransformedState> = {
+        items: (raw) => {
+          transformCalled = true;
+          return (raw as string[]).map((text, i) => ({
+            id: `should-not-see-${i}`,
+            text,
+          }));
+        },
+      };
+
+      await runWithParsingContext(async () => {
+        cacheStructuredData(messageId, {
+          items: [{ id: "pre-cached", text: "x" }],
+        });
+
+        const [, parsed] = await toStructuredMessage<TransformedState>(
+          message,
+          "state",
+          trackingTransforms
+        );
+
+        expect(transformCalled).toBe(false);
+        expect(parsed?.items[0].id).toBe("pre-cached");
+      });
+    });
+
+    it("should still transform when cache exists but target is messages", async () => {
+      const messageId = "messages-target-msg";
+      const message = new AIMessage({
+        id: messageId,
+        content: `\`\`\`json
+{"items": ["y"]}
+\`\`\``,
+      });
+
+      await runWithParsingContext(async () => {
+        cacheStructuredData(messageId, {
+          items: [{ id: "cached", text: "y" }],
+        });
+
+        const [, parsed] = await toStructuredMessage(message, "messages");
+
+        expect(parsed).toBeUndefined();
       });
     });
   });

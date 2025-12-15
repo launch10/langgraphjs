@@ -4,7 +4,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serve } from "@hono/node-server";
 import { createLangGraphApi } from "@langchain/langgraph-api/app";
-import { adsGraph } from "./graphs/ads.js";
+import { adsGraph, adsBridge } from "./graphs/ads.js";
 import { sampleGraph } from "./graphs/sample.js";
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 4124;
@@ -26,7 +26,7 @@ async function main() {
     },
   });
 
-  await registerGraph("ads", adsGraph.compile() as any);
+  await registerGraph("ads", adsGraph.compile() as any, { bridge: adsBridge });
   await registerGraph("sample", sampleGraph.compile() as any);
 
   const server = new Hono();

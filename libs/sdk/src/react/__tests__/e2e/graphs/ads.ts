@@ -12,7 +12,7 @@ import { ChatAnthropic } from "@langchain/anthropic";
 import { tool } from "@langchain/core/tools";
 import { AIMessage, type BaseMessage } from "@langchain/core/messages";
 import { z } from "zod";
-import { toStructuredMessage } from "@langchain/langgraph-api/utils";
+import { createBridge } from "@langchain/langgraph-api/utils";
 
 export interface Headline {
   id: string;
@@ -46,7 +46,7 @@ export const AdsAnnotation = Annotation.Root({
 
 export type AdsState = typeof AdsAnnotation.State;
 
-interface ParsedAdsOutput {
+interface RawAdsOutput {
   headlines?: Array<{
     id: string;
     text: string;
@@ -57,6 +57,24 @@ interface ParsedAdsOutput {
     text: string;
   }>;
 }
+
+export const adsBridge = createBridge<AdsState>({
+  jsonTarget: "state",
+  transforms: {
+    headlines: (raw) =>
+      ((raw as RawAdsOutput["headlines"]) ?? []).map((h) => ({
+        id: h.id,
+        text: h.text,
+        locked: false,
+        rejected: h.status === "rejected",
+      })),
+    descriptions: (raw) =>
+      ((raw as RawAdsOutput["descriptions"]) ?? []).map((d) => ({
+        id: d.id,
+        text: d.text,
+      })),
+  },
+});
 
 const SYSTEM_PROMPT = `You are an expert Google Ads copywriter. When given a business description, generate compelling ad copy.
 
@@ -123,25 +141,16 @@ async function adsAgentNode(
     throw new Error("Agent did not return an AI message");
   }
 
-  const [message, parsed] =
-    await toStructuredMessage<ParsedAdsOutput>(lastMessage, "state");
+  const [message, parsed] = await adsBridge.toStructuredMessage(lastMessage);
 
   const updates: Partial<AdsState> = {};
 
   if (parsed?.headlines) {
-    updates.headlines = parsed.headlines.map((h) => ({
-      id: h.id,
-      text: h.text,
-      locked: false,
-      rejected: h.status === "rejected",
-    }));
+    updates.headlines = parsed.headlines;
   }
 
   if (parsed?.descriptions) {
-    updates.descriptions = parsed.descriptions.map((d) => ({
-      id: d.id,
-      text: d.text,
-    }));
+    updates.descriptions = parsed.descriptions;
   }
 
   const allMessages = result.messages.slice(0, -1).concat([message]);

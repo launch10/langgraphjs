@@ -3,47 +3,12 @@ import { createRoot } from "react-dom/client";
 import {
   useStreamUI,
   MergeStrategies,
-  createPrefixedStableId,
+  type MergeReducer,
   type MessageWithBlocks,
   type MessageBlock,
   type UISnapshot,
 } from "@langchain/langgraph-sdk/react";
-
-type RawHeadline = {
-  text: string;
-  status?: string;
-};
-
-type Headline = {
-  id: string;
-  text: string;
-  locked: boolean;
-  rejected: boolean;
-}
-
-interface RawDescription {
-  text: string;
-}
-
-interface Description {
-  id: string;
-  text: string;
-}
-
-const getHeadlineId = createPrefixedStableId<RawHeadline>("h", "text");
-const getDescriptionId = createPrefixedStableId<RawDescription>("d", "text");
-
-const toHeadline = (raw: RawHeadline): Headline => ({
-  id: getHeadlineId(raw),
-  text: raw.text,
-  locked: false,
-  rejected: raw.status === "rejected",
-});
-
-const toDescription = (raw: RawDescription): Description => ({
-  id: getDescriptionId(raw),
-  text: raw.text,
-});
+import { type Headline, type Description } from "./transforms.js";
 
 type AdsState = {
   messages: { role: string; content: string }[];
@@ -64,6 +29,14 @@ function handleThreadIdChange(threadId: string): void {
   window.history.pushState({}, "", `/${threadId}`);
 }
 
+const MergeLocked: MergeReducer<T> = <T extends { locked: boolean, id: string }>(incoming: T[], current: T[] | undefined): T[] => {
+  if (current === undefined) return incoming;
+  const locked = current.filter((c) => c.locked);
+  const merged =[...locked, ...incoming];
+  const appendUnique = MergeStrategies.appendUnique<T, "id">("id");
+  return appendUnique(merged, locked);
+}
+
 function getAdsOptions() {
   return {
     apiUrl: "http://localhost:8080/api",
@@ -71,12 +44,8 @@ function getAdsOptions() {
     getInitialThreadId: getThreadIdFromUrl,
     onThreadId: handleThreadIdChange,
     fetchStateHistory: true,
-    transform: {
-      headlines: (raw: RawHeadline[]) => raw.map(toHeadline),
-      descriptions: (raw: RawDescription[]) => raw.map(toDescription),
-    } as Record<string, (raw: unknown) => unknown>,
     merge: {
-      headlines: MergeStrategies.appendUnique<Headline, "id">("id"),
+      headlines: MergeLocked<Headline>(),
       descriptions: MergeStrategies.replace<Description[]>(),
     } as Record<string, (incoming: unknown, current: unknown) => unknown>,
   };

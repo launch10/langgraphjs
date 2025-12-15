@@ -603,6 +603,115 @@ describe("E2E: LangGraph API -> useStreamUI", () => {
     }, 120000);
   });
 
+  describe("Bridge Transforms", () => {
+    it("should receive server-transformed state via bridge (no client merge needed)", async () => {
+      const { result } = renderHook(() =>
+        useStreamUI<AdsState>({
+          apiUrl: API_URL,
+          assistantId: "ads",
+        })
+      );
+
+      await waitFor(
+        () => {
+          expect(result.current.isThreadLoading).toBe(false);
+        },
+        { timeout: 10000 }
+      );
+
+      await act(async () => {
+        await result.current.submit({
+          messages: [
+            { type: "human", content: "Create ads for cloud storage service" },
+          ],
+        });
+      });
+
+      await waitFor(
+        () => {
+          expect(result.current.isLoading).toBe(false);
+        },
+        { timeout: 60000, interval: 100 }
+      );
+
+      await waitFor(
+        () => {
+          expect(result.current.values.headlines).toBeDefined();
+        },
+        { timeout: 10000, interval: 500 }
+      );
+
+      expect(Array.isArray(result.current.values.headlines)).toBe(true);
+      expect(result.current.values.headlines!.length).toBeGreaterThan(0);
+
+      const headline = result.current.values.headlines![0]!;
+      expect(headline).toHaveProperty("id");
+      expect(headline).toHaveProperty("text");
+      expect(headline).toHaveProperty("locked");
+      expect(headline).toHaveProperty("rejected");
+      expect(headline.locked).toBe(false);
+      expect(headline.rejected).toBe(false);
+
+      expect(result.current.values.descriptions).toBeDefined();
+      expect(Array.isArray(result.current.values.descriptions)).toBe(true);
+      expect(result.current.values.descriptions!.length).toBeGreaterThan(0);
+
+      const description = result.current.values.descriptions![0]!;
+      expect(description).toHaveProperty("id");
+      expect(description).toHaveProperty("text");
+    }, 120000);
+
+    it("should have transformed state match final values (bridge consistency)", async () => {
+      const { result } = renderHook(() =>
+        useStreamUI<AdsState>({
+          apiUrl: API_URL,
+          assistantId: "ads",
+        })
+      );
+
+      await waitFor(
+        () => {
+          expect(result.current.isThreadLoading).toBe(false);
+        },
+        { timeout: 10000 }
+      );
+
+      await act(async () => {
+        await result.current.submit({
+          messages: [
+            { type: "human", content: "Create ads for a fitness tracker" },
+          ],
+        });
+      });
+
+      await waitFor(
+        () => {
+          expect(result.current.isLoading).toBe(false);
+        },
+        { timeout: 60000, interval: 100 }
+      );
+
+      await waitFor(
+        () => {
+          expect(result.current.values.headlines).toBeDefined();
+        },
+        { timeout: 10000, interval: 500 }
+      );
+
+      for (const h of result.current.values.headlines ?? []) {
+        expect(typeof h.id).toBe("string");
+        expect(typeof h.text).toBe("string");
+        expect(typeof h.locked).toBe("boolean");
+        expect(typeof h.rejected).toBe("boolean");
+      }
+
+      for (const d of result.current.values.descriptions ?? []) {
+        expect(typeof d.id).toBe("string");
+        expect(typeof d.text).toBe("string");
+      }
+    }, 120000);
+  });
+
   describe("Selector Pattern", () => {
     it("should support selector for granular subscriptions", async () => {
       const { result, unmount } = renderHook(() =>

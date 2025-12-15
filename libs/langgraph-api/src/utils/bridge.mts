@@ -17,7 +17,7 @@ export interface Bridge<TState extends Record<string, unknown>> {
   toStructuredMessage: (
     message: BaseMessage | AIMessage | AIMessageChunk
   ) => Promise<ToStructuredMessageResult<TState | undefined>>;
-  applyTransforms: (raw: Record<string, unknown>) => TState;
+  applyTransforms: (raw: Record<keyof TState, unknown>) => Partial<TState>;
 }
 
 export function createBridge<TState extends Record<string, unknown>>(
@@ -25,8 +25,8 @@ export function createBridge<TState extends Record<string, unknown>>(
 ): Bridge<TState> {
   const { jsonTarget, transforms } = config;
 
-  const applyTransforms = (raw: Record<string, unknown>): TState => {
-    if (!transforms) return raw as TState;
+  const applyTransforms = (raw: Record<keyof TState, unknown>): Partial<TState> => {
+    if (!transforms) return raw as Partial<TState>;
 
     const result: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(raw)) {
@@ -35,7 +35,7 @@ export function createBridge<TState extends Record<string, unknown>>(
         | undefined;
       result[key] = transform ? transform(value) : value;
     }
-    return result as TState;
+    return result as Partial<TState>;
   };
 
   const bridgeToStructuredMessage = async (
