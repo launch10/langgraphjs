@@ -9,12 +9,12 @@ import {
   type UISnapshot,
 } from "@langchain/langgraph-sdk/react";
 
-interface RawHeadline {
+type RawHeadline = {
   text: string;
   status?: string;
-}
+};
 
-interface Headline {
+type Headline = {
   id: string;
   text: string;
   locked: boolean;

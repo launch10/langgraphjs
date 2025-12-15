@@ -1,23 +1,5 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { TextBlockParser, tryParseJson } from "../text-block-parser.js";
-
-vi.mock("ai", () => ({
-  parsePartialJson: vi.fn(async (text: string) => {
-    try {
-      const parsed = JSON.parse(text);
-      return { value: parsed };
-    } catch {
-      const partial = text.replace(/[\n\r]/g, "").replace(/,\s*$/, "");
-      try {
-        const fixed = partial.endsWith("}") ? partial : partial + "}";
-        const parsed = JSON.parse(fixed);
-        return { value: parsed };
-      } catch {
-        return { value: undefined };
-      }
-    }
-  }),
-}));
 
 describe("TextBlockParser", () => {
   let parser: TextBlockParser;

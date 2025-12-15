@@ -6,6 +6,24 @@ import { getCachedStructuredData } from "./parsing-context.mjs";
 export type ToStructuredMessageResult<TSchema = unknown> = 
   [AIMessage | AIMessageChunk, TSchema];
 
+export type StateTransforms<TState> = {
+  [K in keyof TState]?: (raw: unknown) => TState[K];
+};
+
+function applyTransforms<TSchema>(
+  parsed: Record<string, unknown>,
+  transforms?: StateTransforms<TSchema>
+): TSchema {
+  if (!transforms) return parsed as TSchema;
+  
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(parsed)) {
+    const transform = transforms[key as keyof TSchema] as ((raw: unknown) => unknown) | undefined;
+    result[key] = transform ? transform(value) : value;
+  }
+  return result as TSchema;
+}
+
 const isAIMessageChunk = (message: BaseMessage): message is AIMessageChunk => {
   return message.constructor.name === "AIMessageChunk";
 };
@@ -92,19 +110,21 @@ function buildMessage<T extends AIMessage | AIMessageChunk>(
 
 async function parseStringContent<TSchema>(
   message: BaseMessage,
-  target: JSONBlockBelongsTo
+  target: JSONBlockBelongsTo,
+  transforms?: StateTransforms<TSchema>
 ): Promise<ToStructuredMessageResult<TSchema | undefined>> {
   const content = message.content as string;
   
   const cached = message.id ? getCachedStructuredData(message.id) : undefined;
   if (cached && target === "state") {
+    const transformed = applyTransforms<TSchema>(cached.data as Record<string, unknown>, transforms);
     const { preamble, postscript } = extractJson(content);
     const blocks: ParsedBlock[] = [];
     let idx = 0;
     if (preamble) blocks.push(createParsedBlock("text", idx++, { sourceText: preamble }));
-    blocks.push(createParsedBlock("structured", idx++, { sourceText: content, data: cached.data }));
+    blocks.push(createParsedBlock("structured", idx++, { sourceText: content, data: transformed as Record<string, unknown> }));
     if (postscript) blocks.push(createParsedBlock("text", idx++, { sourceText: postscript }));
-    return [buildMessage(message, content, blocks), cached.data as TSchema];
+    return [buildMessage(message, content, blocks), transformed];
   }
 
   const parsed = await tryParseJson<TSchema>(content, target);
@@ -118,17 +138,22 @@ async function parseStringContent<TSchema>(
   const blocks: ParsedBlock[] = [];
   let idx = 0;
 
+  const transformed = target === "state" 
+    ? applyTransforms<TSchema>(parsed as Record<string, unknown>, transforms) 
+    : parsed;
+
   if (preamble) blocks.push(createParsedBlock("text", idx++, { sourceText: preamble }));
-  blocks.push(createParsedBlock("structured", idx++, { sourceText: content, data: parsed }));
+  blocks.push(createParsedBlock("structured", idx++, { sourceText: content, data: transformed as Record<string, unknown> }));
   if (postscript) blocks.push(createParsedBlock("text", idx++, { sourceText: postscript }));
 
-  const extractedState = target === "state" ? parsed : undefined;
-  return [buildMessage(message, content, blocks), extractedState];
+  const extractedState = target === "state" ? transformed : undefined;
+  return [buildMessage(message, content, blocks), extractedState as TSchema | undefined];
 }
 
 async function parseArrayContent<TSchema>(
   message: BaseMessage,
-  target: JSONBlockBelongsTo
+  target: JSONBlockBelongsTo,
+  transforms?: StateTransforms<TSchema>
 ): Promise<ToStructuredMessageResult<TSchema | undefined>> {
   const nativeContent: ContentBlock[] = [];
   const parsedBlocks: ParsedBlock[] = [];
@@ -165,9 +190,13 @@ async function parseArrayContent<TSchema>(
     const { preamble } = extractJson(block.text);
     if (preamble) parsedBlocks.push(createParsedBlock("text", idx, { sourceText: preamble }));
 
-    parsedBlocks.push(createParsedBlock("structured", idx + 1, { sourceText: block.text, data: parsed }));
+    const transformed = target === "state"
+      ? applyTransforms<TSchema>(parsed as Record<string, unknown>, transforms)
+      : parsed;
+
+    parsedBlocks.push(createParsedBlock("structured", idx + 1, { sourceText: block.text, data: transformed as Record<string, unknown> }));
     if (target === "state") {
-      extractedState = parsed;
+      extractedState = transformed as TSchema;
     }
 
     nativeContent.push({ type: "text", text: block.text, index: block.index ?? 0, id: block.id ?? crypto.randomUUID() } as ContentBlock.Text);
@@ -185,18 +214,20 @@ export async function toStructuredMessage<TSchema = unknown>(
 
 export async function toStructuredMessage<TSchema = unknown>(
   result: ResultType,
-  jsonBlocksTarget: "state"
+  jsonBlocksTarget: "state",
+  transforms?: StateTransforms<TSchema>
 ): Promise<ToStructuredMessageResult<TSchema | undefined>>;
 
 export async function toStructuredMessage<TSchema = unknown>(
   result: ResultType,
-  jsonBlocksTarget: "messages" | "state" = "messages"
+  jsonBlocksTarget: "messages" | "state" = "messages",
+  transforms?: StateTransforms<TSchema>
 ): Promise<ToStructuredMessageResult<TSchema | undefined> | ToStructuredMessageResult<undefined>> {
   if (typeof result.content === "string") {
-    return parseStringContent<TSchema>(result, jsonBlocksTarget);
+    return parseStringContent<TSchema>(result, jsonBlocksTarget, transforms);
   }
   if (!result.content || !Array.isArray(result.content)) {
     return [result as AIMessage, undefined];
   }
-  return parseArrayContent<TSchema>(result, jsonBlocksTarget);
+  return parseArrayContent<TSchema>(result, jsonBlocksTarget, transforms);
 }

@@ -11,19 +11,7 @@ import { ChatAnthropic } from "@langchain/anthropic";
 import { tool } from "@langchain/core/tools";
 import { AIMessage, type BaseMessage } from "@langchain/core/messages";
 import { z } from "zod";
-import { toStructuredMessage, createPrefixedStableId } from "@langchain/langgraph-api/utils";
-
-export interface Headline {
-  id: string;
-  text: string;
-  locked: boolean;
-  rejected: boolean;
-}
-
-export interface Description {
-  id: string;
-  text: string;
-}
+import { adsBridge, type Headline, type Description } from "./transforms.js";
 
 export const AdsAnnotation = Annotation.Root({
   ...MessagesAnnotation.spec,
@@ -43,24 +31,7 @@ export const AdsAnnotation = Annotation.Root({
   }),
 });
 
-export type AdsState = typeof AdsAnnotation.State;
-
-interface RawHeadline {
-  text: string;
-  status?: string;
-}
-
-interface RawDescription {
-  text: string;
-}
-
-interface ParsedAdsOutput {
-  headlines?: RawHeadline[];
-  descriptions?: RawDescription[];
-}
-
-const getHeadlineId = createPrefixedStableId<RawHeadline>("h", "text");
-const getDescriptionId = createPrefixedStableId<RawDescription>("d", "text");
+export type AdsGraphState = typeof AdsAnnotation.State;
 
 const SYSTEM_PROMPT = `You are an expert Google Ads copywriter. When given a business description, generate compelling ad copy.
 
@@ -69,13 +40,13 @@ Always respond with some friendly text explaining what you're creating, then inc
 \`\`\`json
 {
   "headlines": [
-    {"text": "Headline 1 text", "status": "pending"},
-    {"text": "Headline 2 text", "status": "pending"},
-    {"text": "Headline 3 text", "status": "pending"}
+    "Headline 1 text",
+    "Headline 2 text",
+    "Headline 3 text"
   ],
   "descriptions": [
-    {"text": "Description 1 text"},
-    {"text": "Description 2 text"}
+    "Description 1 text",
+    "Description 2 text"
   ]
 }
 \`\`\`
@@ -110,9 +81,9 @@ const model = new ChatAnthropic({
 }).withConfig({ tags: ["notify"] });
 
 async function adsAgentNode(
-  state: AdsState,
+  state: AdsGraphState,
   config: LangGraphRunnableConfig
-): Promise<Partial<AdsState>> {
+): Promise<Partial<AdsGraphState>> {
   const agent = createReactAgent({
     llm: model,
     tools: [adsFaqTool],
@@ -126,30 +97,13 @@ async function adsAgentNode(
     throw new Error("Agent did not return an AI message");
   }
 
-  const [message, parsed] = await toStructuredMessage<ParsedAdsOutput>(lastMessage, "state");
-
-  const updates: Partial<AdsState> = {};
-  
-  if (parsed?.headlines) {
-    updates.headlines = parsed.headlines.map((h) => ({
-      id: getHeadlineId(h),
-      text: h.text,
-      locked: false,
-      rejected: h.status === "rejected",
-    }));
-  }
-  
-  if (parsed?.descriptions) {
-    updates.descriptions = parsed.descriptions.map((d) => ({
-      id: getDescriptionId(d),
-      text: d.text,
-    }));
-  }
+  const [message, parsed] = await adsBridge.toStructuredMessage(lastMessage);
 
   const allMessages = result.messages.slice(0, -1).concat([message]);
 
   return {
-    ...updates,
+    headlines: parsed?.headlines,
+    descriptions: parsed?.descriptions,
     messages: allMessages,
   };
 }
@@ -158,3 +112,5 @@ export const adsGraph = new StateGraph(AdsAnnotation)
   .addNode("adsAgent", adsAgentNode)
   .addEdge(START, "adsAgent")
   .addEdge("adsAgent", END);
+
+export { adsBridge };

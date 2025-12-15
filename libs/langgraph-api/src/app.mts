@@ -12,8 +12,9 @@ import { cors, ensureContentType } from "./http/middleware.mjs";
 import { bindLoopbackFetch } from "./loopback.mjs";
 import { requestLogger } from "./logging.mjs";
 import { queue } from "./queue.mjs";
-import { registerFromEnv, setDefaults, GRAPHS } from "./graph/load.mjs";
+import { registerFromEnv, setDefaults, GRAPHS, BRIDGES } from "./graph/load.mjs";
 import type { CompiledGraph, Graph } from "@langchain/langgraph";
+import type { Bridge } from "./utils/bridge.mjs";
 
 export interface CorsConfig {
   allow_origins?: string[];
@@ -40,6 +41,10 @@ export interface CreateLangGraphApiOptions {
   enableRequestLogging?: boolean;
 }
 
+export interface RegisterGraphOptions {
+  bridge?: Bridge<Record<string, unknown>>;
+}
+
 export interface LangGraphApi {
   app: Hono<StorageEnv>;
   cleanup: () => Promise<void>;
@@ -47,7 +52,8 @@ export interface LangGraphApi {
     graphId: string,
     graph:
       | CompiledGraph<string, Record<string, unknown>>
-      | Graph<string, Record<string, unknown>>
+      | Graph<string, Record<string, unknown>>,
+    options?: RegisterGraphOptions
   ) => Promise<void>;
   registerGraphsFromFiles: (
     graphs: Record<string, string>,
@@ -118,7 +124,8 @@ export async function createLangGraphApi(
     graphId: string,
     graph:
       | CompiledGraph<string, Record<string, unknown>>
-      | Graph<string, Record<string, unknown>>
+      | Graph<string, Record<string, unknown>>,
+    registerOptions?: RegisterGraphOptions
   ) => {
     const { v5: uuidv5 } = await import("uuid");
 
@@ -130,6 +137,10 @@ export async function createLangGraphApi(
 
     const compiledGraph = isUncompiledGraph(graph) ? graph.compile() : graph;
     GRAPHS[graphId] = compiledGraph;
+
+    if (registerOptions?.bridge) {
+      BRIDGES[graphId] = registerOptions.bridge;
+    }
 
     await ops.assistants.put(
       uuidv5(graphId, NAMESPACE_GRAPH),

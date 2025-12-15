@@ -37,12 +37,19 @@ export function setDefaults(options: {
 }
 import { logger } from "../logging.mjs";
 
+import type { Bridge } from "../utils/bridge.mjs";
+
 export const GRAPHS: Record<
   string,
   CompiledGraph<string> | CompiledGraphFactory<string>
 > = {};
 export const GRAPH_SPEC: Record<string, GraphSpec> = {};
 export const GRAPH_SCHEMA: Record<string, Record<string, GraphSchema>> = {};
+export const BRIDGES: Record<string, Bridge<Record<string, unknown>>> = {};
+
+export function getBridge(graphId: string): Bridge<Record<string, unknown>> | undefined {
+  return BRIDGES[graphId];
+}
 
 export const NAMESPACE_GRAPH = uuid.parse(
   "6ba7b821-9dad-11d1-80b4-00c04fd430c8"

@@ -4,7 +4,7 @@ import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { serve } from "@hono/node-server";
 import { createLangGraphApi } from "@langchain/langgraph-api/app";
-import { adsGraph } from "./graph.mjs";
+import { adsGraph, adsBridge } from "./graph.mjs";
 
 async function main() {
   const postgresUri =
@@ -24,8 +24,8 @@ async function main() {
   });
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await registerGraph("ads", adsGraph.compile() as any);
-  console.log("Registered graph: ads");
+  await registerGraph("ads", adsGraph.compile() as any, { bridge: adsBridge });
+  console.log("Registered graph: ads (with bridge transforms)");
 
   const server = new Hono();
 

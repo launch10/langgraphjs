@@ -10,7 +10,7 @@ import type {
 import type { Pregel } from "@langchain/langgraph/pregel";
 import { Client as LangSmithClient, getDefaultProjectName } from "langsmith";
 import { getLangGraphCommand } from "./command.mjs";
-import { getGraph } from "./graph/load.mjs";
+import { getGraph, getBridge } from "./graph/load.mjs";
 import { checkLangGraphSemver } from "./semver/index.mjs";
 import type { Checkpoint, Run, RunnableConfig } from "./storage/types.mjs";
 import {
@@ -412,7 +412,9 @@ export async function* streamState(
                 const [hasParsed, parsed] = await parsers[message.id].tryParseStructured();
                 if (hasParsed && parsed) {
                   cacheStructuredData(message.id, parsed);
-                  for (const [key, value] of Object.entries(parsed)) {
+                  const bridge = getBridge(graphId);
+                  const transformed = bridge ? bridge.applyTransforms(parsed) : parsed;
+                  for (const [key, value] of Object.entries(transformed)) {
                     yield createUIEvent("ui:state:streaming", {
                       key,
                       value,

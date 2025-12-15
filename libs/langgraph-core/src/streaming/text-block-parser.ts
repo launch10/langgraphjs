@@ -1,4 +1,4 @@
-import { parsePartialJson } from "ai";
+import { parsePartialJson } from "@ai-sdk/ui-utils";
 
 export type JSONBlockBelongsTo = "messages" | "state";
 
