@@ -33,6 +33,7 @@
   "author": "LangChain",
   "license": "MIT",
   "dependencies": {
+    "@ai-sdk/ui-utils": "^1.2.11",
     "@langchain/langgraph-checkpoint": "^1.0.0",
     "@langchain/langgraph-sdk": "~1.2.0",
     "uuid": "^10.0.0"
@@ -185,6 +186,18 @@
       "require": {
         "types": "./dist/graph/zod/schema.d.cts",
         "default": "./dist/graph/zod/schema.cjs"
+      }
+    },
+    "./streaming": {
+      "input": "./src/streaming/index.ts",
+      "typedoc": "./src/streaming/index.ts",
+      "import": {
+        "types": "./dist/streaming/index.d.ts",
+        "default": "./dist/streaming/index.js"
+      },
+      "require": {
+        "types": "./dist/streaming/index.d.cts",
+        "default": "./dist/streaming/index.cjs"
       }
     },
     "./package.json": "./package.json"

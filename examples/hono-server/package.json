@@ -1,0 +1,41 @@
+{
+  "name": "@examples/hono-server",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "turbo dev:client dev:server",
+    "dev:client": "vite",
+    "dev:server": "tsx watch src/server.mts",
+    "dev:server:debug": "node --inspect --import tsx src/server.mts",
+    "dev:libs": "turbo watch build:internal --filter=@langchain/langgraph-sdk --filter=@langchain/langgraph-api --filter=@langchain/langgraph",
+    "dev:full": "concurrently \"yarn dev:libs\" \"yarn dev:server\" \"yarn dev:client\"",
+    "build:internal": "tsc -b && vite build",
+    "format": "prettier --write src",
+    "lint": "prettier --check src"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.13.8",
+    "@langchain/anthropic": "^0.3.0",
+    "@langchain/core": "^1.0.0",
+    "@langchain/langgraph": "workspace:*",
+    "@langchain/langgraph-api": "workspace:*",
+    "@langchain/langgraph-sdk": "workspace:*",
+    "dotenv": "^16.3.1",
+    "hono": "^4.6.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "uuid": "^10.0.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.8",
+    "@types/react-dom": "^19.0.3",
+    "@types/uuid": "^10.0.0",
+    "@vitejs/plugin-react": "^4.4.1",
+    "concurrently": "^8.2.2",
+    "prettier": "^2.8.3",
+    "tsx": "^4.19.3",
+    "typescript": "^5.4.5",
+    "vite": "^5.4.0"
+  }
+}

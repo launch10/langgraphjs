@@ -1,4 +1,6 @@
 import { BaseMessageChunk, isBaseMessage } from "@langchain/core/messages";
+import { TextBlockParser } from "./utils/text-block-parser.mjs";
+import { cacheStructuredData } from "./utils/parsing-context.mjs";
 import { LangChainTracer } from "@langchain/core/tracers/tracer_langchain";
 import type {
   CheckpointMetadata,
@@ -8,7 +10,7 @@ import type {
 import type { Pregel } from "@langchain/langgraph/pregel";
 import { Client as LangSmithClient, getDefaultProjectName } from "langsmith";
 import { getLangGraphCommand } from "./command.mjs";
-import { getGraph } from "./graph/load.mjs";
+import { getGraph, getBridge } from "./graph/load.mjs";
 import { checkLangGraphSemver } from "./semver/index.mjs";
 import type { Checkpoint, Run, RunnableConfig } from "./storage/types.mjs";
 import {
@@ -167,7 +169,8 @@ export async function* streamState(
 
   const libStreamMode: Set<LangGraphStreamMode> = new Set(
     userStreamMode.filter(
-      (mode) => mode !== "events" && mode !== "messages-tuple"
+      (mode): mode is LangGraphStreamMode =>
+        mode !== "events" && mode !== "messages-tuple" && mode !== "ui"
     ) ?? []
   );
 
@@ -245,6 +248,38 @@ export async function* streamState(
 
   const messages: Record<string, BaseMessageChunk> = {};
   const completedIds = new Set<string>();
+  const parsers: Record<string, TextBlockParser> = {};
+  let uiSeq = 0;
+
+  const createUIEvent = (type: string, data: Record<string, unknown>) => ({
+    event: "custom",
+    data: {
+      type,
+      id: crypto.randomUUID(),
+      seq: ++uiSeq,
+      timestamp: Date.now(),
+      ...data,
+    },
+  });
+
+  const extractTextContent = (
+    message: BaseMessageChunk
+  ): string | undefined => {
+    if (typeof message.content === "string") {
+      return message.content;
+    }
+    if (Array.isArray(message.content)) {
+      const textBlock = message.content.find(
+        (b): b is { type: "text"; text: string } =>
+          typeof b === "object" &&
+          b !== null &&
+          "type" in b &&
+          b.type === "text"
+      );
+      return textBlock?.text;
+    }
+    return undefined;
+  };
 
   for await (const event of events) {
     if (event.tags?.includes("langsmith:hidden")) continue;
@@ -308,7 +343,10 @@ export async function* streamState(
     // - handleLLMEnd receives the final message as BaseMessageChunk rather than BaseMessage, which from the outside will become indistinguishable.
     // - handleLLMEnd should not dedupe the message
     // - Don't think there's an utility that would convert a BaseMessageChunk to a BaseMessage?
-    if (userStreamMode.includes("messages")) {
+    if (
+      userStreamMode.includes("messages") ||
+      userStreamMode.includes("messages-tuple")
+    ) {
       if (event.event === "on_chain_stream" && event.run_id === run.run_id) {
         const newMessages: Array<BaseMessageChunk> = [];
         const [_, chunk]: [string, any] = event.data.chunk;
@@ -355,6 +393,53 @@ export async function* streamState(
         }
 
         yield { event: "messages/partial", data: [messages[message.id]] };
+
+        if (userStreamMode.includes("ui")) {
+          const shouldEmitUI =
+            !event.tags ||
+            event.tags.includes("notify") ||
+            !event.metadata?.tags;
+
+          if (shouldEmitUI && message.id) {
+            const textContent = extractTextContent(message);
+            if (textContent) {
+              if (!parsers[message.id]) {
+                parsers[message.id] = new TextBlockParser(0, "state");
+              }
+
+              parsers[message.id].append(textContent);
+              const streamingText = parsers[message.id].getStreamingText();
+              if (streamingText) {
+                yield createUIEvent("ui:content:text", {
+                  messageId: message.id,
+                  blockId: parsers[message.id].textId,
+                  index: 0,
+                  text: streamingText,
+                  final: false,
+                });
+              }
+
+              if (parsers[message.id].hasJsonStart()) {
+                const [hasParsed, parsed] = await parsers[
+                  message.id
+                ].tryParseStructured();
+                if (hasParsed && parsed) {
+                  const bridge = getBridge(graphId);
+                  const transformed = bridge
+                    ? bridge.applyTransforms(parsed)
+                    : parsed;
+                  cacheStructuredData(message.id, transformed);
+                  for (const [key, value] of Object.entries(transformed)) {
+                    yield createUIEvent("ui:state:streaming", {
+                      key,
+                      value,
+                    });
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     }
   }
