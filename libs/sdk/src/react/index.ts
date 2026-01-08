@@ -37,13 +37,26 @@ export {
 } from "./use-subgraph-state.js";
 export type {
   MessageMetadata,
-  UseStream,
   UseStreamOptions,
-  UseStreamCustom,
   UseStreamCustomOptions,
   UseStreamTransport,
   UseStreamThread,
 } from "./types.js";
+export type {
+  GetToolCallsType,
+  // Agent type extraction helpers
+  AgentTypeConfigLike,
+  IsAgentLike,
+  ExtractAgentConfig,
+  InferAgentToolCalls,
+} from "../ui/types.js";
+export type {
+  ToolCallWithResult,
+  ToolCallState,
+  DefaultToolCall,
+  ToolCallFromTool,
+  ToolCallsFromTools,
+} from "../types.messages.js";
 
 export { MergeStrategies, stableHash, createStableId, createPrefixedStableId } from "../ui/streaming/merge.js";
 export type {
