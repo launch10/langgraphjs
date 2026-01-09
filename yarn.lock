@@ -1702,9 +1702,11 @@ __metadata:
     pg: "npm:^8.13.0"
     postgres: "npm:^3.4.5"
     prettier: "npm:^2.8.3"
+    redis: "npm:^4.7.0"
     semver: "npm:^7.7.1"
     stacktrace-parser: "npm:^0.1.10"
     superjson: "npm:^2.2.2"
+    testcontainers: "npm:^10.0.0"
     tsx: "npm:^4.19.3"
     typescript: "npm:^4.9.5 || ^5.4.5"
     uuid: "npm:^10.0.0"
@@ -1718,15 +1720,15 @@ __metadata:
     "@langchain/langgraph": ^0.2.57 || ^0.3.0 || ^0.4.0 || ^1.0.0-alpha || ^1.0.0
     "@langchain/langgraph-checkpoint": ~0.0.16 || ^0.1.0 || ~1.0.0
     "@langchain/langgraph-checkpoint-postgres": ^0.1.0
-    "@langchain/langgraph-postgres": ^0.0.1
     "@langchain/langgraph-sdk": ~0.0.16 || ^0.1.0 || ^1.0.0
+    redis: ^4.7.0
     typescript: ^5.5.4
   peerDependenciesMeta:
     "@langchain/langgraph-checkpoint-postgres":
       optional: true
-    "@langchain/langgraph-postgres":
-      optional: true
     "@langchain/langgraph-sdk":
+      optional: true
+    redis:
       optional: true
   languageName: unknown
   linkType: soft
