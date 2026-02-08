@@ -223,6 +223,7 @@ export const RunCreate = z
             "debug",
             "custom",
             "ui",
+            "raw_events",
           ])
         ),
         z.enum([
@@ -236,6 +237,7 @@ export const RunCreate = z
           "debug",
           "custom",
           "ui",
+          "raw_events",
         ]),
       ])
       .optional(),

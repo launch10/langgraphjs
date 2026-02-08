@@ -15,7 +15,19 @@ const FALLBACK_POLL_INTERVAL_MS = 10000;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-export const queue = async (ops: Ops) => {
+export interface QueueOptions {
+  onRunComplete?: (
+    run: Run,
+    result: {
+      checkpoint: StreamCheckpoint | undefined;
+      status: string | undefined;
+      exception?: Error;
+    }
+  ) => Promise<void>;
+  shutdownSignal?: AbortSignal;
+}
+
+export const queue = async (ops: Ops, options?: QueueOptions) => {
   let notifier: RunNotifier | null = null;
   let notificationChannel: string | null = null;
 
@@ -36,13 +48,21 @@ export const queue = async (ops: Ops) => {
   // Defaults are set globally by server.mts via setDefaults()
   // The getGraph function will use those defaults unless explicitly overridden
 
-  while (true) {
+  while (!options?.shutdownSignal?.aborted) {
     let processedAny = false;
 
-    for await (const { run, attempt, signal } of ops.runs.next()) {
-      processedAny = true;
-      await worker(ops, run, attempt, signal);
+    try {
+      for await (const { run, attempt, signal } of ops.runs.next()) {
+        if (options?.shutdownSignal?.aborted) break;
+        processedAny = true;
+        await worker(ops, run, attempt, signal, options);
+      }
+    } catch (error) {
+      if (options?.shutdownSignal?.aborted) break;
+      // DB errors during shutdown are expected; continue otherwise
     }
+
+    if (options?.shutdownSignal?.aborted) break;
 
     if (processedAny) {
       continue;
@@ -67,7 +87,8 @@ const worker = async (
   ops: Ops,
   run: Run,
   attempt: number,
-  signal: AbortSignal
+  signal: AbortSignal,
+  options?: QueueOptions
 ) => {
   const startedAt = new Date();
   let endedAt: Date | undefined = undefined;
@@ -197,6 +218,21 @@ const worker = async (
         run_started_at: startedAt,
         run_ended_at: endedAt,
       });
+    }
+
+    if (options?.onRunComplete) {
+      try {
+        await options.onRunComplete(run, {
+          checkpoint,
+          status,
+          exception,
+        });
+      } catch (hookError) {
+        logError(hookError, {
+          prefix: "onRunComplete hook failed",
+          context: { run_id: run.run_id },
+        });
+      }
     }
   }
 };

@@ -10,9 +10,29 @@ import * as path from "node:path";
 
 let CUSTOM_AUTH: Auth | undefined;
 let DISABLE_STUDIO_AUTH = false;
+let PROGRAMMATIC_AUTH: ProgrammaticAuthConfig | undefined;
 
-export const isAuthRegistered = () => CUSTOM_AUTH != null;
+export interface ProgrammaticAuthConfig {
+  authenticate: (request: Request) => Promise<any>;
+  authorize?: (
+    context: any,
+    resource: string,
+    action: string,
+    value: any
+  ) => Promise<boolean | object>;
+}
+
+export const isAuthRegistered = () =>
+  CUSTOM_AUTH != null || PROGRAMMATIC_AUTH != null;
 export const isStudioAuthDisabled = () => DISABLE_STUDIO_AUTH;
+
+export function registerProgrammaticAuth(config: ProgrammaticAuthConfig) {
+  PROGRAMMATIC_AUTH = config;
+}
+
+export function clearProgrammaticAuth() {
+  PROGRAMMATIC_AUTH = undefined;
+}
 
 export type AuthFilters =
   | Record<string, string | { $eq?: string; $contains?: string | string[] }>
@@ -57,6 +77,34 @@ export async function authorize(payload: {
   value: unknown;
   context: AuthContext | undefined | null;
 }) {
+  // Try programmatic authorize first
+  if (PROGRAMMATIC_AUTH?.authorize && payload.context) {
+    try {
+      const result = await PROGRAMMATIC_AUTH.authorize(
+        payload.context,
+        payload.resource,
+        payload.action,
+        payload.value
+      );
+
+      if (result == null || result === true) {
+        return { filters: undefined, value: payload.value };
+      }
+
+      if (result === false) throw new HTTPException(403);
+
+      if (typeof result !== "object") {
+        throw new HTTPException(500, {
+          message: `Auth handler returned invalid result. Expected filter object, null, undefined or boolean. Got "${typeof result}" instead.`,
+        });
+      }
+
+      return { filters: result as AuthFilters, value: payload.value };
+    } catch (error) {
+      throw convertError(error);
+    }
+  }
+
   // find filters and execute them
   const handlers = CUSTOM_AUTH?.["~handlerCache"];
   if (!handlers) return { filters: undefined, value: payload.value };
@@ -102,52 +150,64 @@ export async function authorize(payload: {
 }
 
 export async function authenticate(request: Request) {
+  // Try programmatic auth first
+  if (PROGRAMMATIC_AUTH) {
+    try {
+      const response = await PROGRAMMATIC_AUTH.authenticate(request);
+      return normalizeAuthResponse(response);
+    } catch (error) {
+      throw convertError(error);
+    }
+  }
+
   const handlers = CUSTOM_AUTH?.["~handlerCache"];
   if (!handlers?.authenticate) return undefined;
 
   try {
     const response = await handlers.authenticate(request);
-
-    // normalize auth response
-    const { scopes, user } = (() => {
-      if (typeof response === "string") {
-        return {
-          scopes: [],
-          user: {
-            permissions: [],
-            identity: response,
-            display_name: response,
-            is_authenticated: true,
-          },
-        };
-      }
-
-      if ("identity" in response && typeof response.identity === "string") {
-        const scopes =
-          "permissions" in response && Array.isArray(response.permissions)
-            ? response.permissions
-            : [];
-
-        return {
-          scopes,
-          user: {
-            ...response,
-            permissions: scopes,
-            is_authenticated: response.is_authenticated ?? true,
-            display_name: response.display_name ?? response.identity,
-          },
-        };
-      }
-
-      throw new Error(
-        "Invalid auth response received. Make sure to either return a `string` or an object with `identity` property."
-      );
-    })();
-
-    return { scopes, user };
+    return normalizeAuthResponse(response);
   } catch (error) {
     throw convertError(error);
   }
+}
+
+function normalizeAuthResponse(response: any): AuthContext {
+  const { scopes, user } = (() => {
+    if (typeof response === "string") {
+      return {
+        scopes: [] as string[],
+        user: {
+          permissions: [] as string[],
+          identity: response,
+          display_name: response,
+          is_authenticated: true,
+        },
+      };
+    }
+
+    if ("identity" in response && typeof response.identity === "string") {
+      const scopes =
+        "permissions" in response && Array.isArray(response.permissions)
+          ? response.permissions
+          : [];
+
+      return {
+        scopes,
+        user: {
+          ...response,
+          permissions: scopes,
+          is_authenticated: response.is_authenticated ?? true,
+          display_name: response.display_name ?? response.identity,
+        },
+      };
+    }
+
+    throw new Error(
+      "Invalid auth response received. Make sure to either return a `string` or an object with `identity` property."
+    );
+  })();
+
+  return { scopes, user };
 }
 
 export async function registerAuth(

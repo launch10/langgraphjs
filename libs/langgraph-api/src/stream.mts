@@ -1,6 +1,4 @@
 import { BaseMessageChunk, isBaseMessage } from "@langchain/core/messages";
-import { TextBlockParser } from "./utils/text-block-parser.mjs";
-import { cacheStructuredData } from "./utils/parsing-context.mjs";
 import { LangChainTracer } from "@langchain/core/tracers/tracer_langchain";
 import type {
   CheckpointMetadata,
@@ -10,7 +8,7 @@ import type {
 import type { Pregel } from "@langchain/langgraph/pregel";
 import { Client as LangSmithClient, getDefaultProjectName } from "langsmith";
 import { getLangGraphCommand } from "./command.mjs";
-import { getGraph, getBridge } from "./graph/load.mjs";
+import { getGraph } from "./graph/load.mjs";
 import { checkLangGraphSemver } from "./semver/index.mjs";
 import type { Checkpoint, Run, RunnableConfig } from "./storage/types.mjs";
 import {
@@ -170,7 +168,10 @@ export async function* streamState(
   const libStreamMode: Set<LangGraphStreamMode> = new Set(
     userStreamMode.filter(
       (mode): mode is LangGraphStreamMode =>
-        mode !== "events" && mode !== "messages-tuple" && mode !== "ui"
+        mode !== "events" &&
+        mode !== "messages-tuple" &&
+        mode !== "ui" &&
+        mode !== "raw_events"
     ) ?? []
   );
 
@@ -180,6 +181,15 @@ export async function* streamState(
 
   if (userStreamMode.includes("messages")) {
     libStreamMode.add("values");
+  }
+
+  // When raw_events mode is requested, ensure we get messages, updates, and
+  // custom modes so graph.streamEvents() produces the mode tuples that
+  // the langgraph-ai-sdk's adaptStreamEvents() expects
+  if (userStreamMode.includes("raw_events")) {
+    libStreamMode.add("messages");
+    libStreamMode.add("updates");
+    libStreamMode.add("custom");
   }
 
   if (!libStreamMode.has("debug")) libStreamMode.add("debug");
@@ -248,38 +258,6 @@ export async function* streamState(
 
   const messages: Record<string, BaseMessageChunk> = {};
   const completedIds = new Set<string>();
-  const parsers: Record<string, TextBlockParser> = {};
-  let uiSeq = 0;
-
-  const createUIEvent = (type: string, data: Record<string, unknown>) => ({
-    event: "custom",
-    data: {
-      type,
-      id: crypto.randomUUID(),
-      seq: ++uiSeq,
-      timestamp: Date.now(),
-      ...data,
-    },
-  });
-
-  const extractTextContent = (
-    message: BaseMessageChunk
-  ): string | undefined => {
-    if (typeof message.content === "string") {
-      return message.content;
-    }
-    if (Array.isArray(message.content)) {
-      const textBlock = message.content.find(
-        (b): b is { type: "text"; text: string } =>
-          typeof b === "object" &&
-          b !== null &&
-          "type" in b &&
-          b.type === "text"
-      );
-      return textBlock?.text;
-    }
-    return undefined;
-  };
 
   for await (const event of events) {
     if (event.tags?.includes("langsmith:hidden")) continue;
@@ -334,6 +312,11 @@ export async function* streamState(
       }
     } else if (userStreamMode.includes("events")) {
       yield { event: "events", data: event };
+    }
+
+    // Emit raw events for langgraph-ai-sdk consumption over SSE
+    if (userStreamMode.includes("raw_events")) {
+      yield { event: "raw_events", data: event };
     }
 
     // TODO: we still rely on old messages mode based of streamMode=values
@@ -393,53 +376,6 @@ export async function* streamState(
         }
 
         yield { event: "messages/partial", data: [messages[message.id]] };
-
-        if (userStreamMode.includes("ui")) {
-          const shouldEmitUI =
-            !event.tags ||
-            event.tags.includes("notify") ||
-            !event.metadata?.tags;
-
-          if (shouldEmitUI && message.id) {
-            const textContent = extractTextContent(message);
-            if (textContent) {
-              if (!parsers[message.id]) {
-                parsers[message.id] = new TextBlockParser(0, "state");
-              }
-
-              parsers[message.id].append(textContent);
-              const streamingText = parsers[message.id].getStreamingText();
-              if (streamingText) {
-                yield createUIEvent("ui:content:text", {
-                  messageId: message.id,
-                  blockId: parsers[message.id].textId,
-                  index: 0,
-                  text: streamingText,
-                  final: false,
-                });
-              }
-
-              if (parsers[message.id].hasJsonStart()) {
-                const [hasParsed, parsed] = await parsers[
-                  message.id
-                ].tryParseStructured();
-                if (hasParsed && parsed) {
-                  const bridge = getBridge(graphId);
-                  const transformed = bridge
-                    ? bridge.applyTransforms(parsed)
-                    : parsed;
-                  cacheStructuredData(message.id, transformed);
-                  for (const [key, value] of Object.entries(transformed)) {
-                    yield createUIEvent("ui:state:streaming", {
-                      key,
-                      value,
-                    });
-                  }
-                }
-              }
-            }
-          }
-        }
       }
     }
   }
