@@ -76,9 +76,11 @@ export class RedisQueue implements StreamQueue {
     lastEventId?: string;
     signal?: AbortSignal;
   }): Promise<[id: string, message: Message]> {
-    const client = this.streamManager.getClient();
+    // Use the dedicated reader client for XREAD BLOCK to avoid blocking
+    // the main client which is shared with XADD producers.
+    const client = this.streamManager.getReaderClient();
     if (!client) {
-      throw new Error("Redis client not connected");
+      throw new Error("Redis reader client not connected");
     }
 
     if (options.signal?.aborted) {
@@ -87,7 +89,10 @@ export class RedisQueue implements StreamQueue {
 
     let startId: string;
     if (this.resumable && options.lastEventId != null) {
-      startId = options.lastEventId;
+      // Normalize special IDs: "-1" means "from the very beginning" in our
+      // protocol, but Redis XREAD expects "0" for that semantic.
+      const eid = options.lastEventId;
+      startId = eid === "-1" || eid === "0" ? "0" : eid;
     } else if (this.resumable) {
       startId = "0";
     } else {
@@ -139,6 +144,7 @@ export type ControlAction = "interrupt" | "rollback";
 export class RedisStreamManager implements StreamManager {
   private readonly url: string;
   private client: RedisClientType | null = null;
+  private readerClient: RedisClientType | null = null;
   private subscriberClient: RedisClientType | null = null;
   private queues: Record<string, RedisQueue> = {};
   private control: Record<string, CancellationAbortController> = {};
@@ -153,6 +159,13 @@ export class RedisStreamManager implements StreamManager {
 
     this.client = createClient({ url: this.url }) as RedisClientType;
     await this.client.connect();
+
+    // Dedicated client for blocking XREAD operations.
+    // XREAD BLOCK ties up the connection, so using the same client for
+    // both reads and writes (XADD) would cause writes to queue behind
+    // the blocked read. See: https://github.com/redis/node-redis/issues/2258
+    this.readerClient = this.client.duplicate() as RedisClientType;
+    await this.readerClient.connect();
 
     this.subscriberClient = this.client.duplicate() as RedisClientType;
     await this.subscriberClient.connect();
@@ -169,6 +182,11 @@ export class RedisStreamManager implements StreamManager {
     }
     this.subscriberClient = null;
 
+    if (this.readerClient?.isOpen) {
+      await this.readerClient.disconnect();
+    }
+    this.readerClient = null;
+
     if (this.client?.isOpen) {
       await this.client.disconnect();
     }
@@ -179,6 +197,10 @@ export class RedisStreamManager implements StreamManager {
 
   getClient(): RedisClientType | null {
     return this.client;
+  }
+
+  getReaderClient(): RedisClientType | null {
+    return this.readerClient;
   }
 
   getQueue(

@@ -1,0 +1,28 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@langchain/langgraph-sdk": ["../../libs/sdk/src/index.ts"],
+      "@langchain/langgraph-sdk/react": ["../../libs/sdk/src/react/index.ts"],
+      "@langchain/langgraph-sdk/client": ["../../libs/sdk/src/client.ts"],
+      "@langchain/langgraph-api": ["../../libs/langgraph-api/src/cli/spawn.mts"],
+      "@langchain/langgraph-api/app": ["../../libs/langgraph-api/src/app.mts"],
+      "@langchain/langgraph-api/utils": ["../../libs/langgraph-api/src/utils/index.mts"],
+      "@langchain/langgraph": ["../../libs/langgraph/src/index.ts"],
+      "@langchain/langgraph/prebuilt": ["../../libs/langgraph/src/prebuilt/index.ts"],
+      "@langchain/langgraph-checkpoint": ["../../libs/checkpoint/src/index.ts"],
+      "@langchain/langgraph-checkpoint-postgres": ["../../libs/checkpoint-postgres/src/index.ts"],
+      "@langchain/langgraph-ui": ["../../libs/langgraph-ui/src/index.ts"]
+    }
+  },
+  "include": [
+    "src",
+    "../../libs/sdk/src",
+    "../../libs/langgraph-api/src",
+    "../../libs/langgraph/src",
+    "../../libs/checkpoint/src",
+    "../../libs/checkpoint-postgres/src",
+    "../../libs/langgraph-ui/src"
+  ]
+}

@@ -20,7 +20,8 @@ export type StreamMode =
   | "tasks"
   | "checkpoints"
   | "custom"
-  | "messages-tuple";
+  | "messages-tuple"
+  | "ui";
 
 export type ThreadStreamMode = "run_modes" | "lifecycle" | "state_update";
 

@@ -7,13 +7,20 @@ import assistants from "./api/assistants.mjs";
 import store from "./api/store.mjs";
 import meta from "./api/meta.mjs";
 
-import type { Ops, StorageEnv } from "./storage/types.mjs";
+import type { Ops, Run, StorageEnv } from "./storage/types.mjs";
 import { cors, ensureContentType } from "./http/middleware.mjs";
 import { bindLoopbackFetch } from "./loopback.mjs";
 import { requestLogger } from "./logging.mjs";
 import { queue } from "./queue.mjs";
-import { registerFromEnv, setDefaults, GRAPHS } from "./graph/load.mjs";
+import { registerFromEnv, setDefaults, GRAPHS, BRIDGES } from "./graph/load.mjs";
 import type { CompiledGraph, Graph } from "@langchain/langgraph";
+import type { Bridge } from "./utils/bridge.mjs";
+import type { StreamCheckpoint } from "./stream.mjs";
+import {
+  registerProgrammaticAuth,
+  type ProgrammaticAuthConfig,
+} from "./auth/index.mjs";
+import { auth as authMiddleware } from "./auth/custom.mjs";
 
 export interface CorsConfig {
   allow_origins?: string[];
@@ -38,6 +45,19 @@ export interface CreateLangGraphApiOptions {
     store?: boolean;
   };
   enableRequestLogging?: boolean;
+  auth?: ProgrammaticAuthConfig;
+  onRunComplete?: (
+    run: Run,
+    result: {
+      checkpoint: StreamCheckpoint | undefined;
+      status: string | undefined;
+      exception?: Error;
+    }
+  ) => Promise<void>;
+}
+
+export interface RegisterGraphOptions {
+  bridge?: Bridge<Record<string, unknown>>;
 }
 
 export interface LangGraphApi {
@@ -47,7 +67,8 @@ export interface LangGraphApi {
     graphId: string,
     graph:
       | CompiledGraph<string, Record<string, unknown>>
-      | Graph<string, Record<string, unknown>>
+      | Graph<string, Record<string, unknown>>,
+    options?: RegisterGraphOptions
   ) => Promise<void>;
   registerGraphsFromFiles: (
     graphs: Record<string, string>,
@@ -98,6 +119,12 @@ export async function createLangGraphApi(
     app.use(requestLogger());
   }
 
+  // Register programmatic auth if provided
+  if (options.auth) {
+    registerProgrammaticAuth(options.auth);
+    app.use(authMiddleware());
+  }
+
   app.use(ensureContentType());
 
   if (!options.disableRoutes?.meta) app.route("/", meta);
@@ -106,10 +133,14 @@ export async function createLangGraphApi(
   if (!options.disableRoutes?.threads) app.route("/", threads);
   if (!options.disableRoutes?.store) app.route("/", store);
 
+  const queueShutdown = new AbortController();
   const numWorkers =
     options.workers ?? parseInt(process.env.LANGGRAPH_WORKERS ?? "10", 10);
   for (let i = 0; i < numWorkers; i++) {
-    queue(ops);
+    queue(ops, {
+      onRunComplete: options.onRunComplete,
+      shutdownSignal: queueShutdown.signal,
+    });
   }
 
   const NAMESPACE_GRAPH = "6ba7b821-9dad-11d1-80b4-00c04fd430c8";
@@ -118,7 +149,8 @@ export async function createLangGraphApi(
     graphId: string,
     graph:
       | CompiledGraph<string, Record<string, unknown>>
-      | Graph<string, Record<string, unknown>>
+      | Graph<string, Record<string, unknown>>,
+    registerOptions?: RegisterGraphOptions
   ) => {
     const { v5: uuidv5 } = await import("uuid");
 
@@ -130,6 +162,10 @@ export async function createLangGraphApi(
 
     const compiledGraph = isUncompiledGraph(graph) ? graph.compile() : graph;
     GRAPHS[graphId] = compiledGraph;
+
+    if (registerOptions?.bridge) {
+      BRIDGES[graphId] = registerOptions.bridge;
+    }
 
     await ops.assistants.put(
       uuidv5(graphId, NAMESPACE_GRAPH),
@@ -154,7 +190,10 @@ export async function createLangGraphApi(
     });
   };
 
-  const cleanup = () => postgresOps.shutdown();
+  const cleanup = async () => {
+    queueShutdown.abort();
+    await postgresOps.shutdown();
+  };
 
   return {
     app,

@@ -222,6 +222,8 @@ export const RunCreate = z
             "checkpoints",
             "debug",
             "custom",
+            "ui",
+            "raw_events",
           ])
         ),
         z.enum([
@@ -234,6 +236,8 @@ export const RunCreate = z
           "checkpoints",
           "debug",
           "custom",
+          "ui",
+          "raw_events",
         ]),
       ])
       .optional(),

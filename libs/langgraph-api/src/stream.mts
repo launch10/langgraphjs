@@ -167,7 +167,11 @@ export async function* streamState(
 
   const libStreamMode: Set<LangGraphStreamMode> = new Set(
     userStreamMode.filter(
-      (mode) => mode !== "events" && mode !== "messages-tuple"
+      (mode): mode is LangGraphStreamMode =>
+        mode !== "events" &&
+        mode !== "messages-tuple" &&
+        mode !== "ui" &&
+        mode !== "raw_events"
     ) ?? []
   );
 
@@ -177,6 +181,15 @@ export async function* streamState(
 
   if (userStreamMode.includes("messages")) {
     libStreamMode.add("values");
+  }
+
+  // When raw_events mode is requested, ensure we get messages, updates, and
+  // custom modes so graph.streamEvents() produces the mode tuples that
+  // the langgraph-ai-sdk's adaptStreamEvents() expects
+  if (userStreamMode.includes("raw_events")) {
+    libStreamMode.add("messages");
+    libStreamMode.add("updates");
+    libStreamMode.add("custom");
   }
 
   if (!libStreamMode.has("debug")) libStreamMode.add("debug");
@@ -301,6 +314,11 @@ export async function* streamState(
       yield { event: "events", data: event };
     }
 
+    // Emit raw events for langgraph-ai-sdk consumption over SSE
+    if (userStreamMode.includes("raw_events")) {
+      yield { event: "raw_events", data: event };
+    }
+
     // TODO: we still rely on old messages mode based of streamMode=values
     // In order to fully switch to library messages mode, we need to do ensure that
     // `StreamMessagesHandler` sends the final message, which requires the following:
@@ -308,7 +326,10 @@ export async function* streamState(
     // - handleLLMEnd receives the final message as BaseMessageChunk rather than BaseMessage, which from the outside will become indistinguishable.
     // - handleLLMEnd should not dedupe the message
     // - Don't think there's an utility that would convert a BaseMessageChunk to a BaseMessage?
-    if (userStreamMode.includes("messages")) {
+    if (
+      userStreamMode.includes("messages") ||
+      userStreamMode.includes("messages-tuple")
+    ) {
       if (event.event === "on_chain_stream" && event.run_id === run.run_id) {
         const newMessages: Array<BaseMessageChunk> = [];
         const [_, chunk]: [string, any] = event.data.chunk;

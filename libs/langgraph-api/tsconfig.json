@@ -12,5 +12,5 @@
     "noUnusedLocals": true,
     "outDir": "dist"
   },
-  "exclude": ["scripts/*", "dist/*", "**/*.test.ts", "**/*.int.test.ts"]
+  "exclude": ["scripts/*", "dist/*", "**/*.test.ts", "**/*.int.test.ts", "**/*.test.mts", "**/*.int.test.mts", "tests/*"]
 }
